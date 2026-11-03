@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block titulo %}{{ c.nome }}{% endblock %}
+{% block conteudo %}
+<a class="voltar" href="{{ url_for('clientes') }}">← Clientes</a>
+<div class="cabecalho-pagina">
+  <div>
+    <h1>{{ c.nome }}{% if not c.ativo %} <small>(inativo)</small>{% endif %}</h1>
+    {% if c.telefone %}<p class="sub">📞 {{ c.telefone }}</p>{% endif %}
+    {% if c.observacao %}<p class="sub">{{ c.observacao }}</p>{% endif %}
+  </div>
+  <div class="botoes-topo">
+    <a class="botao" href="{{ url_for('imprimir_cliente', cliente_id=c.id) }}">🖨️ Imprimir extrato</a>
+    <a class="botao" href="{{ url_for('cliente_editar', cliente_id=c.id) }}">Editar cadastro</a>
+  </div>
+</div>
+
+<section class="saldo-grande {{ 'devendo' if c.saldo > 0 else ('credito' if c.saldo < 0 else 'zerado') }}">
+  {% if c.saldo > 0 %}<span class="rotulo">Está devendo</span><span class="valor">{{ c.saldo|reais }}</span>
+  {% elif c.saldo < 0 %}<span class="rotulo">Tem crédito (pagou a mais)</span><span class="valor">{{ (-c.saldo)|reais }}</span>
+  {% else %}<span class="rotulo">Não deve nada</span><span class="valor">{{ 0|reais }}</span>{% endif %}
+</section>
+
+<div class="acoes">
+  <a class="botao botao-principal botao-grande" href="{{ url_for('venda_nova', cliente_id=c.id) }}">🛒 Nova venda</a>
+  <a class="botao botao-pagamento botao-grande" href="{{ url_for('pagamento_novo', cliente_id=c.id) }}">💵 Registrar pagamento</a>
+</div>
+
+<section class="indicadores pequenos">
+  <div class="indicador"><span class="rotulo">Comprou no sistema</span><span class="valor">{{ c.comprado|reais }}</span></div>
+  <div class="indicador"><span class="rotulo">Pagou no sistema</span><span class="valor">{{ c.pago|reais }}</span></div>
+  {% if c.saldo_inicial %}
+  <div class="indicador"><span class="rotulo">Veio da planilha antiga</span><span class="valor">{{ c.saldo_inicial|reais }}</span></div>
+  {% endif %}
+</section>
+<p class="dica">Saldo = {% if c.saldo_inicial %}saldo da planilha antiga + {% endif %}compras − pagamentos.
+  Vendas e pagamentos cancelados aparecem riscados e não contam.</p>
+
+<section class="cartao">
+  <h2>Histórico</h2>
+  {% if extrato %}
+  <ul class="extrato">
+    {% for l in extrato %}
+    <li class="tipo-{{ l.tipo }} {{ 'cancelado' if l.cancelado }}">
+      <div class="linha-principal">
+        <span class="data">{{ l.data|data_br or '—' }}</span>
+        <span class="descricao">
+          {% if l.tipo == 'venda' %}<b>Compra</b>{% elif l.tipo == 'pagamento' %}<b>{{ l.descricao }}</b>{% else %}<b>{{ l.descricao }}</b>{% endif %}
+          {% if l.cancelado %}<span class="etiqueta">cancelado</span>{% endif %}
+        </span>
+        <span class="valor">{{ '−' if l.tipo == 'pagamento' else '+' }} {{ l.valor|reais }}</span>
+      </div>
+      {% if l.itens %}
+      <ul class="itens">
+        {% for i in l.itens %}<li>{{ i.quantidade }}× {{ i.descricao }} <span>{{ i.preco_unit|reais }} cada = {{ (i.quantidade * i.preco_unit)|reais }}</span>
+          {%- if i.preco_tabela is not none and i.preco_tabela > i.preco_unit %} <small class="credito">(de {{ i.preco_tabela|reais }}, desconto de {{ (i.quantidade * (i.preco_tabela - i.preco_unit))|reais }})</small>{% endif %}</li>{% endfor %}
+      </ul>
+      {% endif %}
+      {% if l.observacao %}<p class="obs">{{ l.observacao }}</p>{% endif %}
+      <div class="linha-rodape">
+        <span class="saldo-apos">saldo depois: {{ l.saldo_apos|reais }}</span>
+        {% if l.tipo in ('venda', 'pagamento') and not l.cancelado %}
+        <form method="post" action="{{ url_for('venda_cancelar', venda_id=l.id) if l.tipo == 'venda' else url_for('pagamento_cancelar', pagamento_id=l.id) }}"
+              onsubmit="return confirm('Cancelar {{ 'esta compra' if l.tipo == 'venda' else 'este pagamento' }} de {{ l.valor|reais }}? Use isso só para corrigir um lançamento feito errado.');">
+          <button class="link-perigo" type="submit">cancelar</button>
+        </form>
+        {% endif %}
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}<p class="vazio">Nenhuma compra ou pagamento ainda.</p>{% endif %}
+</section>
+{% endblock %}

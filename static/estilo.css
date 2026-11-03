@@ -1,0 +1,297 @@
+/* Paleta laranja. Contraste conferido (WCAG AA, 4.5:1): no claro o laranja é escuro com texto branco;
+   no escuro o laranja é claro com texto escuro. O claro usa bege, não branco, para não ofuscar. A dívida usa carmim (não vermelho-alaranjado) para
+   não se confundir com os botões laranja. */
+:root {
+  --fundo: #ece2d6;          /* bege "papel": menos ofuscante que branco */
+  --cartao: #fbf6f0;         /* quadros em off-white, não branco puro */
+  --texto: #2a211b;
+  --suave: #5f534a;
+  --borda: #ddcdbc;
+  --principal: #b33c0b;
+  --principal-texto: #ffffff;
+  --pagamento: #1b6e45;
+  --pagamento-texto: #ffffff;
+  --devendo: #be123c;
+  --devendo-fundo: #f9e3e7;
+  --credito: #1b6e45;
+  --credito-fundo: #dfeee3;
+  --zerado: #675d54;
+  --zerado-fundo: #e6dbcf;
+  --raio: 12px;
+}
+/* Tema escuro: automático (segue o aparelho) ou forçado pelo botão do topo (data-theme no <html>).
+   Os mesmos tokens aparecem duas vezes porque CSS não deixa juntar @media e seletor. */
+:root { color-scheme: light dark; }
+:root[data-theme="light"] { color-scheme: light; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --fundo: #17130f;
+    --cartao: #221c17;
+    --texto: #f1ece6;
+    --suave: #b3a89c;
+    --borda: #3a3029;
+    --principal: #fb923c;
+    --principal-texto: #1c1006;
+    --pagamento: #4cc38a;
+    --pagamento-texto: #08170f;
+    --devendo: #fb7185;
+    --devendo-fundo: #3b1a22;
+    --credito: #6fcf97;
+    --credito-fundo: #193226;
+    --zerado: #b3a89c;
+    --zerado-fundo: #2c241e;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --fundo: #17130f;
+  --cartao: #221c17;
+  --texto: #f1ece6;
+  --suave: #b3a89c;
+  --borda: #3a3029;
+  --principal: #fb923c;
+  --principal-texto: #1c1006;
+  --pagamento: #4cc38a;
+  --pagamento-texto: #08170f;
+  --devendo: #fb7185;
+  --devendo-fundo: #3b1a22;
+  --credito: #6fcf97;
+  --credito-fundo: #193226;
+  --zerado: #b3a89c;
+  --zerado-fundo: #2c241e;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--fundo); color: var(--texto);
+  font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+a { color: var(--principal); }
+h1 { font-size: 1.5rem; margin: .4rem 0 1rem; }
+h2 { font-size: 1.1rem; margin: 0 0 .8rem; }
+h3 { font-size: 1rem; margin: 1.2rem 0 .5rem; }
+small { color: var(--suave); }
+main { max-width: 1000px; margin: 0 auto; padding: 16px; }
+
+/* topo */
+.topo {
+  position: sticky; top: 0; z-index: 10; background: var(--cartao); border-bottom: 1px solid var(--borda);
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 16px;
+  padding: 8px 16px;
+}
+.marca { font-weight: 700; text-decoration: none; color: var(--texto); }
+.topo-esquerda { display: flex; align-items: center; gap: 10px; }
+.botao-tema {
+  font: inherit; font-size: .85rem; color: var(--suave); background: var(--fundo);
+  border: 1px solid var(--borda); border-radius: 999px; padding: 4px 10px; min-height: 32px; cursor: pointer; white-space: nowrap;
+}
+.topo nav { display: flex; gap: 4px; overflow-x: auto; }
+@media (max-width: 520px) {
+  .topo nav { width: 100%; }
+  .topo nav a { flex: 1; text-align: center; padding: 8px 4px !important; font-size: .95rem; }
+}
+.topo nav a {
+  text-decoration: none; color: var(--suave); padding: 8px 12px; border-radius: 8px; white-space: nowrap;
+}
+.topo nav a.ativo { background: var(--principal); color: var(--principal-texto); }
+.rodape { text-align: center; padding: 24px 16px 40px; }
+
+/* blocos */
+.cartao {
+  background: var(--cartao); border: 1px solid var(--borda); border-radius: var(--raio);
+  padding: 16px; margin-bottom: 16px;
+}
+.cabecalho-pagina {
+  display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;
+  margin: 8px 0 20px;   /* espaço entre o título/botão e o que vem embaixo */
+}
+.cabecalho-pagina h1 { margin: 0; }
+.sub { margin: 0 0 .3rem; color: var(--suave); }
+.botoes-topo { display: flex; flex-wrap: wrap; gap: 8px; }
+.voltar { display: inline-block; margin-top: 4px; text-decoration: none; color: var(--suave); }
+.duas-colunas { display: grid; gap: 16px; grid-template-columns: 1fr; }
+@media (min-width: 760px) { .duas-colunas { grid-template-columns: 1fr 1fr; } }
+.dica { color: var(--suave); font-size: .9rem; }
+.vazio { color: var(--suave); font-style: italic; }
+.mais { display: inline-block; margin-top: 8px; }
+
+.ajuda {
+  background: var(--cartao); border: 1px dashed var(--borda); border-radius: var(--raio);
+  padding: 8px 14px; margin-bottom: 16px; color: var(--suave);
+}
+.ajuda summary { cursor: pointer; font-weight: 600; color: var(--texto); }
+.ajuda summary::before {
+  content: "i"; display: inline-grid; place-items: center; width: 1.3em; height: 1.3em; margin-right: 6px;
+  border-radius: 50%; background: var(--principal); color: var(--principal-texto); font-size: .8em; font-weight: 700;
+}
+.ajuda p, .ajuda ol { margin: .5rem 0; }
+
+.aviso { padding: 12px 14px; border-radius: var(--raio); margin-bottom: 16px; font-weight: 500; }
+.aviso-ok { background: var(--credito-fundo); color: var(--credito); }
+.aviso-erro { background: var(--devendo-fundo); color: var(--devendo); }
+
+/* botões e formulários */
+.botao {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 10px 16px; min-height: 44px; border-radius: 10px; border: 1px solid var(--borda);
+  background: var(--cartao); color: var(--texto); font: inherit; font-weight: 600;
+  text-decoration: none; cursor: pointer;
+}
+.botao:disabled { opacity: .45; cursor: not-allowed; }
+.botao-principal { background: var(--principal); border-color: var(--principal); color: var(--principal-texto); }
+.botao-pagamento { background: var(--pagamento); border-color: var(--pagamento); color: var(--pagamento-texto); }
+.botao-grande { min-height: 56px; font-size: 1.05rem; width: 100%; }
+.acoes { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 16px 0; }
+.link-perigo { background: none; border: 0; color: var(--devendo); font: inherit; font-size: .85rem; cursor: pointer; text-decoration: underline; padding: 4px; }
+
+input, select, textarea {
+  font: inherit; color: var(--texto); background: var(--fundo);
+  border: 1px solid var(--borda); border-radius: 8px; padding: 10px 12px; min-height: 44px; width: 100%;
+}
+/* observação cresce sozinha conforme digita (field-sizing onde houver; senão o script em base.html) */
+textarea { resize: none; overflow: hidden; field-sizing: content; min-height: 44px; }
+input:focus, select:focus, textarea:focus { outline: 2px solid var(--principal); outline-offset: 1px; }
+/* minmax(0, 1fr): a coluna nunca passa da largura do quadro, mesmo que o navegador ache o campo "largo" */
+.formulario { display: grid; gap: 14px; grid-template-columns: minmax(0, 1fr); }
+.formulario label { display: grid; gap: 4px; font-weight: 600; grid-template-columns: minmax(0, 1fr); min-width: 0; }
+.formulario label small, .formulario input, .formulario select, .formulario textarea { font-weight: 400; }
+.formulario.em-linha { grid-template-columns: 1fr; }
+@media (min-width: 640px) {
+  .formulario.em-linha { grid-template-columns: 2fr 1fr 1fr auto; align-items: end; }
+  .formulario.em-linha h2 { grid-column: 1 / -1; }
+}
+.check { display: flex !important; align-items: center; gap: 8px; font-weight: 500 !important; }
+.check input { width: auto; min-height: 0; }
+.obrigatorio { color: var(--devendo); }
+.entrar { max-width: 380px; margin: 10vh auto; }
+.entrar form { display: grid; gap: 14px; grid-template-columns: minmax(0, 1fr); }
+.entrar label { display: grid; gap: 4px; }
+
+.busca-rapida, .filtros { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 16px; }
+.busca-rapida input, .filtros input[type=search] { flex: 1 1 220px; }
+.filtros select { width: auto; }
+/* rótulo em cima do campo; botão alinhado pela base do campo, na mesma linha */
+.filtros-mes { align-items: flex-end; }
+.filtros-mes label { display: grid; gap: 4px; font-weight: 600; }
+.filtros-mes input, .filtros-mes .botao { height: 46px; min-height: 0; }
+.filtros-mes input { font-weight: 400; }
+.contagem { color: var(--suave); font-size: .9rem; margin: -8px 0 8px; }
+
+/* números */
+.indicadores { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.indicador {
+  background: var(--cartao); border: 1px solid var(--borda); border-radius: var(--raio);
+  padding: 14px 16px; display: grid; gap: 2px;
+}
+.indicador .rotulo { color: var(--suave); font-size: .9rem; }
+.indicador .valor { font-size: 1.5rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.indicador .nota { color: var(--suave); font-size: .82rem; }
+.indicador.destaque { border-color: var(--devendo); }
+.indicador.destaque .valor { color: var(--devendo); }
+.indicadores.pequenos { grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 8px; }
+.indicadores.pequenos .indicador { padding: 10px 12px; }
+.indicadores.pequenos .rotulo { font-size: .8rem; }
+.indicadores.pequenos .valor { font-size: .98rem; white-space: nowrap; }
+
+.devendo { color: var(--devendo); }
+.credito { color: var(--credito); }
+.zerado { color: var(--zerado); }
+.saldo { font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.saldo-grande {
+  border-radius: var(--raio); padding: 18px; display: grid; gap: 2px; text-align: center; margin: 12px 0;
+}
+.saldo-grande .rotulo { font-weight: 600; }
+.saldo-grande .valor { font-size: 2.2rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+.saldo-grande.devendo { background: var(--devendo-fundo); }
+.saldo-grande.credito { background: var(--credito-fundo); }
+.saldo-grande.zerado { background: var(--zerado-fundo); }
+
+/* listas */
+.lista { list-style: none; margin: 0; padding: 0; }
+.lista > li {
+  display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  padding: 10px 0; border-bottom: 1px solid var(--borda);
+}
+.lista > li:last-child { border-bottom: 0; }
+.lista > li > span:first-child { display: grid; }
+.lista li.inativo { opacity: .6; }
+.lista-clientes { background: var(--cartao); border: 1px solid var(--borda); border-radius: var(--raio); }
+.lista-clientes > li { padding: 0; }
+.lista-clientes > li[hidden] { display: none; }
+.lista-clientes a {
+  display: flex; justify-content: space-between; gap: 12px; width: 100%;
+  padding: 14px 16px; text-decoration: none; color: var(--texto);
+}
+.rodape-lista { text-align: center; font-size: .9rem; }
+
+/* extrato */
+.extrato { list-style: none; margin: 0; padding: 0; }
+.extrato > li { padding: 12px 0; border-bottom: 1px solid var(--borda); }
+.extrato > li:last-child { border-bottom: 0; }
+.linha-principal { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: baseline; }
+.extrato .data { color: var(--suave); font-size: .85rem; font-variant-numeric: tabular-nums; }
+.extrato .valor { font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.extrato .tipo-venda .valor, .extrato .tipo-inicial .valor { color: var(--devendo); }
+.extrato .tipo-pagamento .valor { color: var(--credito); }
+.extrato .itens { margin: 4px 0 0; padding-left: 20px; color: var(--suave); font-size: .9rem; }
+.extrato .itens span { white-space: nowrap; }
+.extrato .obs { margin: 4px 0 0; font-size: .9rem; font-style: italic; color: var(--suave); }
+.linha-rodape { display: flex; justify-content: space-between; align-items: center; margin-top: 4px; }
+.saldo-apos { color: var(--suave); font-size: .82rem; }
+.extrato .cancelado .linha-principal .valor,
+.extrato .cancelado .descricao b { text-decoration: line-through; opacity: .6; }
+.etiqueta { font-size: .75rem; background: var(--zerado-fundo); color: var(--zerado); border-radius: 6px; padding: 1px 6px; margin-left: 4px; }
+.tipo-venda small, small.tipo-venda { color: var(--suave); }
+
+/* venda */
+.venda { display: grid; gap: 16px; grid-template-columns: 1fr; }
+@media (min-width: 860px) { .venda { grid-template-columns: 3fr 2fr; align-items: start; } .carrinho { position: sticky; top: 70px; } }
+.grade-produtos { list-style: none; padding: 0; margin: 12px 0 0; display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+.produto {
+  position: relative; width: 100%; min-height: 72px; text-align: left; display: grid; gap: 2px;
+  padding: 10px 12px; border-radius: 10px; border: 1px solid var(--borda); background: var(--fundo);
+  color: var(--texto); font: inherit; cursor: pointer;
+}
+.produto:active { transform: scale(.98); }
+.produto .nome { font-weight: 600; line-height: 1.2; }
+.produto .preco { color: var(--suave); font-size: .9rem; }
+.produto .estoque { color: var(--suave); font-size: .8rem; }
+.produto .estoque.alerta, .aviso-estoque { color: var(--devendo); font-weight: 600; }
+.aviso-estoque { grid-column: 1 / -1; font-size: .85rem; }
+.produto-info { display: grid; text-align: right; font-variant-numeric: tabular-nums; }
+.produto .qtd {
+  position: absolute; top: -6px; right: -6px; background: var(--principal); color: var(--principal-texto);
+  border-radius: 999px; min-width: 24px; height: 24px; display: grid; place-items: center; font-size: .8rem; font-weight: 700;
+}
+.avulso { display: grid; gap: 8px; grid-template-columns: 1fr; }
+@media (min-width: 520px) { .avulso { grid-template-columns: 2fr 1fr auto; } }
+.itens-carrinho { list-style: none; padding: 0; margin: 0 0 8px; }
+.itens-carrinho li {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "desc desc rem" "qtd preco sub";
+  gap: 6px 10px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--borda);
+}
+.itens-carrinho .descricao { grid-area: desc; font-weight: 600; }
+.itens-carrinho .remover { grid-area: rem; background: none; border: 0; color: var(--suave); font-size: 1.1rem; cursor: pointer; min-width: 36px; min-height: 36px; }
+.controle-qtd { grid-area: qtd; display: inline-flex; align-items: center; gap: 6px; }
+.controle-qtd button {
+  width: 36px; height: 36px; border-radius: 8px; border: 1px solid var(--borda);
+  background: var(--fundo); color: var(--texto); font-size: 1.1rem; cursor: pointer;
+}
+.controle-qtd .qtd { min-width: 24px; text-align: center; font-weight: 700; }
+.preco-item { grid-area: preco; min-width: 0; display: grid; gap: 2px; color: var(--suave); }
+.preco-item small { font-size: .75rem; white-space: nowrap; }
+.campo-preco { display: inline-flex; align-items: center; gap: 4px; }
+.preco-item input { width: 100%; min-width: 56px; max-width: 96px; min-height: 36px; padding: 6px 8px; font-weight: 600; }
+.desconto { grid-column: 1 / -1; font-size: .85rem; color: var(--credito); font-weight: 600; }
+.desconto.acima { color: var(--suave); }
+.descontos-venda { text-align: right; margin: -6px 0 0; color: var(--credito); }
+.subtotal { grid-area: sub; align-self: end; padding-bottom: 8px; white-space: nowrap; font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; }
+.carrinho form { display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr); }
+.carrinho form label { display: grid; gap: 4px; font-weight: 600; }
+.total { font-size: 1.4rem; font-weight: 800; text-align: right; }
+
+/* tabelas */
+.tabela { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.tabela th, .tabela td { padding: 8px 6px; border-bottom: 1px solid var(--borda); text-align: right; }
+.tabela th:first-child, .tabela td:first-child { text-align: left; }
+.tabela th { color: var(--suave); font-weight: 600; font-size: .9rem; }

@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block titulo %}Início{% endblock %}
+{% block conteudo %}
+<details class="ajuda">
+  <summary>Como usar</summary>
+  <p>Esta é a tela de resumo. Para <b>lançar uma venda ou um pagamento</b>, procure o cliente na caixa
+  abaixo (ou vá em <b>Clientes</b>), abra o cadastro dele e use os botões <b>Nova venda</b> ou
+  <b>Registrar pagamento</b>. O saldo é recalculado sozinho, não precisa somar nada.</p>
+</details>
+
+<form class="busca-rapida" action="{{ url_for('clientes') }}" method="get">
+  <input type="search" name="q" placeholder="Buscar cliente…" aria-label="Buscar cliente">
+  <button class="botao" type="submit">Buscar</button>
+</form>
+
+<section class="indicadores">
+  <div class="indicador destaque">
+    <span class="rotulo">Total a receber</span>
+    <span class="valor">{{ total_receber|reais }}</span>
+    <span class="nota">{{ qtd_devendo }} de {{ qtd_clientes }} clientes estão devendo</span>
+  </div>
+  <div class="indicador">
+    <span class="rotulo">Vendido neste mês</span>
+    <span class="valor">{{ resumo.vendido|reais }}</span>
+    <span class="nota">vendas lançadas em {{ mes[5:7] }}/{{ mes[0:4] }}</span>
+  </div>
+  <div class="indicador">
+    <span class="rotulo">Recebido neste mês</span>
+    <span class="valor">{{ resumo.recebido|reais }}</span>
+    <span class="nota">pagamentos lançados em {{ mes[5:7] }}/{{ mes[0:4] }}</span>
+  </div>
+</section>
+
+<div class="duas-colunas">
+  <section class="cartao">
+    <h2>Quem mais deve</h2>
+    {% if maiores %}
+    <ul class="lista">
+      {% for c in maiores %}
+      <li><a href="{{ url_for('cliente_ver', cliente_id=c.id) }}">{{ c.nome }}</a>
+          <span class="saldo devendo">{{ c.saldo|reais }}</span></li>
+      {% endfor %}
+    </ul>
+    <a class="mais" href="{{ url_for('clientes', ordem='saldo') }}">Ver todos por saldo →</a>
+    {% else %}<p class="vazio">Ninguém está devendo.</p>{% endif %}
+  </section>
+
+  <section class="cartao">
+    <h2>Últimos lançamentos</h2>
+    {% if ultimos %}
+    <ul class="lista">
+      {% for l in ultimos %}
+      <li><span><a href="{{ url_for('cliente_ver', cliente_id=l.cliente_id) }}">{{ l.nome }}</a>
+          <small class="tipo-{{ l.tipo }}">{{ 'comprou' if l.tipo == 'venda' else 'pagou' }} · {{ l.data|data_br }}</small></span>
+          <span class="{{ 'devendo' if l.tipo == 'venda' else 'credito' }}">{{ l.valor|reais }}</span></li>
+      {% endfor %}
+    </ul>
+    {% else %}<p class="vazio">Nenhuma venda ou pagamento lançado ainda.</p>{% endif %}
+  </section>
+</div>
+{% endblock %}

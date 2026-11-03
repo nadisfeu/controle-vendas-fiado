@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block titulo %}Produtos{% endblock %}
+{% block conteudo %}
+<h1>Produtos</h1>
+<details class="ajuda">
+  <summary>Como usar</summary>
+  <p>Cadastre aqui o que você vende, com o preço normal e quantas unidades tem. Na hora da venda é só tocar no produto.</p>
+  <p><b>Estoque:</b> cada venda desconta sozinha; cancelar a venda devolve. Chegou mercadoria? Toque no produto
+  e use <b>"Chegou mercadoria"</b> para somar.</p>
+  <p>Mudou o preço? Edite o produto: <b>as vendas antigas continuam com o preço da época</b>.
+  Parou de vender? Desmarque "ativo": ele some da tela de venda, mas o histórico fica.</p>
+</details>
+
+<form method="post" class="cartao formulario em-linha">
+  <h2>Cadastrar produto</h2>
+  <label>Nome <input name="nome" required value="{{ form.get('nome', '') }}" placeholder="ex.: Perfume 100 ml"></label>
+  <label>Preço <input name="preco" inputmode="decimal" required value="{{ form.get('preco', '') }}" placeholder="ex.: 89,90"></label>
+  <label>Quantidade <input name="estoque" inputmode="numeric" value="{{ form.get('estoque', '') }}" placeholder="ex.: 10"></label>
+  <button class="botao botao-principal" type="submit">Adicionar</button>
+</form>
+
+<section class="cartao">
+  <h2>{{ produtos|length }} produto{{ 's' if produtos|length != 1 }}</h2>
+  {% if produtos %}
+  <ul class="lista">
+    {% for p in produtos %}
+    <li class="{{ 'inativo' if not p.ativo }}">
+      <a href="{{ url_for('produto_editar', produto_id=p.id) }}">{{ p.nome }}{% if not p.ativo %} <small>(inativo)</small>{% endif %}</a>
+      <span class="produto-info">{{ p.preco|reais }}
+        <small class="{{ 'devendo' if p.estoque <= 0 }}">{% if p.estoque > 0 %}{{ p.estoque }} em estoque{% elif p.estoque == 0 %}sem estoque{% else %}faltam {{ -p.estoque }}{% endif %}</small></span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}<p class="vazio">Nenhum produto cadastrado ainda.</p>{% endif %}
+</section>
+{% endblock %}

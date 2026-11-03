@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block titulo %}{{ 'Editar ' ~ c.nome if c else 'Novo cliente' }}{% endblock %}
+{% block conteudo %}
+<a class="voltar" href="{{ url_for('cliente_ver', cliente_id=c.id) if c else url_for('clientes') }}">← Voltar</a>
+<h1>{{ 'Editar cadastro' if c else 'Novo cliente' }}</h1>
+<form method="post" class="cartao formulario">
+  <label><span>Nome <span class="obrigatorio">*</span></span>
+    <input name="nome" required value="{{ form.get('nome', c.nome if c else '') }}" autofocus>
+    <small>Use um nome que identifique bem, por exemplo "Marta Jardim". Não dá para ter dois clientes com o mesmo nome.</small>
+  </label>
+  <label>Telefone
+    <input name="telefone" type="tel" value="{{ form.get('telefone', c.telefone if c else '') }}">
+  </label>
+  <label>Observação
+    <textarea name="observacao" rows="2">{{ form.get('observacao', c.observacao if c else '') }}</textarea>
+    <small>Endereço, onde trabalha, quem indicou… o que ajudar a lembrar.</small>
+  </label>
+  {% if c %}
+  <label>Saldo trazido da planilha antiga
+    <input name="saldo_inicial" inputmode="decimal" value="{{ form.get('saldo_inicial', c.saldo_inicial|campo) }}">
+    <small>Quanto o cliente devia quando o sistema começou. Só mexa aqui para corrigir um valor que veio errado
+    da planilha. Para compras e pagamentos novos, use os botões na tela do cliente. Valor negativo = crédito.</small>
+  </label>
+  <label class="check">
+    <input type="checkbox" name="ativo" value="1" {{ 'checked' if (form.get('ativo') == '1' if form else c.ativo) }}>
+    Cliente ativo <small>(desmarque para esconder da lista sem apagar o histórico)</small>
+  </label>
+  {% endif %}
+  <button class="botao botao-principal" type="submit">Salvar</button>
+</form>
+{% endblock %}

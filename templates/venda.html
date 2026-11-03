@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block titulo %}Nova venda · {{ c.nome }}{% endblock %}
+{% block conteudo %}
+<a class="voltar" href="{{ url_for('cliente_ver', cliente_id=c.id) }}">← {{ c.nome }}</a>
+<h1>Nova venda para {{ c.nome }}</h1>
+
+<details class="ajuda" open>
+  <summary>Como usar</summary>
+  <ol>
+    <li>Toque nos produtos que o cliente levou. Tocar de novo soma mais um.</li>
+    <li>Na lista "Itens desta venda", ajuste a quantidade com − e +.</li>
+    <li><b>Deu desconto?</b> Toque em <b>"Vendido por"</b> e digite o valor que o cliente pagou em cada um
+      (ex.: o perfume é 200,00 e saiu por 170,00). O desconto aparece embaixo do item.</li>
+    <li>Item que não está cadastrado? Use <b>Item avulso</b>.</li>
+    <li>Confira o total e toque em <b>Salvar venda</b>.</li>
+  </ol>
+</details>
+
+<div class="venda">
+  <section class="cartao">
+    <h2>Produtos</h2>
+    {% if produtos %}
+    <input type="search" id="busca-produto" placeholder="Buscar produto…" aria-label="Buscar produto">
+    <ul class="grade-produtos" id="produtos"></ul>
+    {% else %}
+    <p class="vazio">Nenhum produto cadastrado ainda. <a href="{{ url_for('produtos') }}">Cadastrar produtos</a>
+      ou use o item avulso abaixo.</p>
+    {% endif %}
+    <h3>Item avulso</h3>
+    <div class="avulso">
+      <input id="avulso-descricao" placeholder="Descrição (ex.: encomenda)" aria-label="Descrição do item avulso">
+      <input id="avulso-preco" inputmode="decimal" placeholder="Valor (ex.: 25,00)" aria-label="Valor do item avulso">
+      <button class="botao" type="button" id="avulso-adicionar">Adicionar</button>
+    </div>
+  </section>
+
+  <section class="cartao carrinho">
+    <h2>Itens desta venda</h2>
+    <ul id="carrinho" class="itens-carrinho"></ul>
+    <p class="vazio" id="carrinho-vazio">Nenhum item ainda. Toque em um produto ao lado.</p>
+    <form method="post" id="form-venda">
+      <input type="hidden" name="itens" id="campo-itens">
+      <div class="total">Total: <span id="total">R$ 0,00</span></div>
+      <p class="descontos-venda" id="descontos" hidden>Descontos nesta venda: <b id="descontos-valor"></b></p>
+      <p class="dica">Saldo atual: {{ c.saldo|reais }} → depois desta venda: <b id="saldo-depois">{{ c.saldo|reais }}</b></p>
+      <label>Data da venda <input type="date" name="data" value="{{ data }}" required></label>
+      <label>Observação (opcional) <input name="observacao" value="{{ observacao }}"></label>
+      <button class="botao botao-principal botao-grande" type="submit" id="salvar" disabled>Salvar venda</button>
+    </form>
+  </section>
+</div>
+
+<script id="dados-produtos" type="application/json">{{ produtos|tojson }}</script>
+<script id="dados-carrinho" type="application/json">{{ carrinho|tojson }}</script>
+<script id="dados-saldo" type="application/json">{{ c.saldo|tojson }}</script>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='venda.js') }}"></script>{% endblock %}

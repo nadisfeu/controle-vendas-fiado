@@ -1,0 +1,11 @@
+.venv/
+.env
+dados.db
+*.db
+__pycache__/
+.pytest_cache/
+# dados reais nunca vão para o git
+backups/
+*.xlsx
+*.csv
+*.pdf

@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block titulo %}Editar {{ p.nome }}{% endblock %}
+{% block conteudo %}
+<a class="voltar" href="{{ url_for('produtos') }}">← Produtos</a>
+<h1>Editar produto</h1>
+<form method="post" class="cartao formulario">
+  <label>Nome <input name="nome" required value="{{ form.get('nome', p.nome) }}"></label>
+  <label>Preço <input name="preco" inputmode="decimal" required value="{{ form.get('preco', p.preco|campo) }}">
+    <small>O novo preço vale só para as próximas vendas.</small></label>
+  <label><span>Chegou mercadoria? Quantas unidades somar</span>
+    <input name="entrada" inputmode="numeric" placeholder="ex.: 12" value="{{ form.get('entrada', '') }}">
+    <small>Soma ao estoque atual ({{ p.estoque }}). Deixe vazio se não chegou nada.</small></label>
+  <label>Quantidade em estoque agora
+    <input name="estoque" inputmode="numeric" value="{{ form.get('estoque', p.estoque) }}">
+    <small>Só mude aqui para corrigir depois de contar o que tem. Para mercadoria nova, use o campo de cima.
+    Negativo = vendeu mais do que tinha.</small></label>
+  <label class="check">
+    <input type="checkbox" name="ativo" value="1" {{ 'checked' if (form.get('ativo') == '1' if form else p.ativo) }}>
+    Ativo <small>(desmarque para tirar da tela de venda)</small>
+  </label>
+  <button class="botao botao-principal" type="submit">Salvar</button>
+</form>
+{% endblock %}

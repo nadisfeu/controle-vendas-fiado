@@ -1,0 +1,50 @@
+{% extends "imprimir_base.html" %}
+{% block titulo %}{{ c.nome }} · {{ nome_mes }}{% endblock %}
+{% block voltar %}{{ url_for('cliente_ver', cliente_id=c.id) }}{% endblock %}
+{% block conteudo %}
+<header class="cabecalho-folha">
+  <h1>{{ c.nome }}</h1>
+  <p>Extrato de {{ nome_mes }}{% if c.telefone %} · {{ c.telefone }}{% endif %}</p>
+</header>
+
+<section class="totais">
+  <div><span>Saldo anterior</span><b>{{ e.anterior|reais }}</b></div>
+  <div><span>Comprou no mês</span><b>{{ e.comprou|reais }}</b></div>
+  <div><span>Pagou no mês</span><b>{{ e.pagou|reais }}</b></div>
+  <div class="destaque">
+    {% if e.final < 0 %}<span>Crédito no fim do mês</span><b>{{ (-e.final)|reais }}</b>
+    {% else %}<span>Saldo no fim do mês</span><b>{{ e.final|reais }}</b>{% endif %}
+  </div>
+</section>
+
+<h2>Movimento do mês</h2>
+<table class="extrato">
+  <thead><tr><th>Data</th><th>Descrição</th><th>Valor</th><th>Saldo</th></tr></thead>
+  <tbody>
+    <tr class="suave"><td></td><td>Saldo anterior</td><td></td><td>{{ e.anterior|reais }}</td></tr>
+    {% for l in e.linhas %}
+    <tr>
+      <td>{{ l.data|data_br }}</td>
+      <td>
+        {% if l.tipo == 'venda' %}
+          <b>Compra</b>
+          <ul class="itens">
+            {% for i in l.itens %}<li>{{ i.quantidade }}× {{ i.descricao }} — {{ i.preco_unit|reais }} cada
+              {%- if i.preco_tabela is not none and i.preco_tabela > i.preco_unit %} (de {{ i.preco_tabela|reais }}, desconto de {{ (i.quantidade * (i.preco_tabela - i.preco_unit))|reais }}){% endif %}</li>{% endfor %}
+          </ul>
+        {% else %}<b>{{ l.descricao }}</b>{% endif %}
+        {% if l.observacao %}<div class="obs">{{ l.observacao }}</div>{% endif %}
+      </td>
+      <td class="valor">{{ '−' if l.tipo == 'pagamento' else '+' }} {{ l.valor|reais }}</td>
+      <td>{{ l.saldo_apos|reais }}</td>
+    </tr>
+    {% else %}
+    <tr><td></td><td class="vazio" colspan="3">Nenhuma compra ou pagamento em {{ nome_mes }}.</td></tr>
+    {% endfor %}
+  </tbody>
+  <tfoot>
+    <tr><td></td><td>{% if e.final < 0 %}Crédito no fim do mês{% else %}Saldo no fim do mês{% endif %}</td><td></td>
+        <td>{{ (-e.final if e.final < 0 else e.final)|reais }}</td></tr>
+  </tfoot>
+</table>
+{% endblock %}

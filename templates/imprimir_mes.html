@@ -1,0 +1,64 @@
+{% extends "imprimir_base.html" %}
+{% block titulo %}Resumo de {{ nome_mes }}{% endblock %}
+{% block voltar %}{{ url_for('relatorios', mes=mes) }}{% endblock %}
+{% block escolhas %}
+<label>Clientes
+  <select name="mostrar" onchange="this.form.submit()">
+    <option value="movimento" {{ 'selected' if mostrar == 'movimento' }}>Só quem comprou ou pagou no mês</option>
+    <option value="todos" {{ 'selected' if mostrar == 'todos' }}>Todos com saldo ou movimento</option>
+  </select>
+</label>
+{% endblock %}
+{% block conteudo %}
+<header class="cabecalho-folha">
+  <h1>Resumo de {{ nome_mes }}</h1>
+</header>
+
+<section class="totais">
+  <div><span>Vendido no mês</span><b>{{ totais.comprou|reais }}</b></div>
+  <div><span>Recebido no mês</span><b>{{ totais.pagou|reais }}</b></div>
+  <div><span>A receber no fim do mês</span><b>{{ a_receber|reais }}</b><small>{{ qtd_devendo }} clientes devendo</small></div>
+  {% if creditos %}<div><span>Créditos de clientes</span><b>{{ creditos|reais }}</b><small>pagaram a mais</small></div>{% endif %}
+</section>
+
+<h2>Por cliente</h2>
+<p class="explica">Saldo anterior + comprou − pagou = saldo no fim do mês.
+  {% if mostrar == 'movimento' %}Só aparecem clientes que compraram ou pagaram em {{ nome_mes }}.{% endif %}</p>
+{% if linhas %}
+<table>
+  <thead>
+    <tr><th>Cliente</th><th>Saldo anterior</th><th>Comprou</th><th>Pagou</th><th>Saldo no fim</th></tr>
+  </thead>
+  <tbody>
+    {% for c in linhas %}
+    <tr>
+      <td>{{ c.nome }}</td>
+      <td>{{ c.anterior|reais }}</td>
+      <td>{{ c.comprou|reais if c.comprou else '—' }}</td>
+      <td>{{ c.pagou|reais if c.pagou else '—' }}</td>
+      <td class="forte">{% if c.final < 0 %}crédito {{ (-c.final)|reais }}{% else %}{{ c.final|reais }}{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+  {% if mostrar == 'todos' %}
+  <tfoot>
+    <tr><td>Total ({{ linhas|length }} clientes)</td><td>{{ totais.anterior|reais }}</td><td>{{ totais.comprou|reais }}</td>
+        <td>{{ totais.pagou|reais }}</td><td>{{ totais.final|reais }}</td></tr>
+  </tfoot>
+  {% endif %}
+</table>
+{% if mostrar == 'todos' %}<p class="explica">O total da última coluna já desconta os créditos.</p>{% endif %}
+{% else %}
+<p class="vazio">Nenhum cliente comprou ou pagou em {{ nome_mes }}.</p>
+{% endif %}
+
+{% if produtos %}
+<h2>Produtos vendidos no mês</h2>
+<table class="estreita">
+  <thead><tr><th>Produto</th><th>Quantidade</th><th>Total</th></tr></thead>
+  <tbody>
+    {% for p in produtos %}<tr><td>{{ p.descricao }}</td><td>{{ p.quantidade }}</td><td>{{ p.total|reais }}</td></tr>{% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block titulo %}Clientes{% endblock %}
+{% block conteudo %}
+<div class="cabecalho-pagina">
+  <h1>Clientes</h1>
+  <a class="botao botao-principal" href="{{ url_for('cliente_novo') }}">+ Novo cliente</a>
+</div>
+
+<details class="ajuda">
+  <summary>Como usar</summary>
+  <p>Digite parte do nome para filtrar (não precisa de acento nem maiúscula). Toque no cliente para
+  ver o histórico e lançar <b>venda</b> ou <b>pagamento</b>.</p>
+  <p>Em <b>Ordem</b> dá para ver primeiro quem deve mais (maior saldo) ou quem deve menos / tem crédito (menor saldo).</p>
+  <p>Cores do saldo: <span class="devendo">vermelho = está devendo</span>,
+  <span class="credito">verde = tem crédito</span> (pagou a mais), cinza = zerado.</p>
+</details>
+
+<div class="filtros">
+  <input type="search" id="filtro" placeholder="Filtrar pelo nome…" value="{{ request.args.get('q', '') }}"
+         aria-label="Filtrar clientes" autofocus>
+  <label class="check"><input type="checkbox" id="so-devendo"> Só quem deve</label>
+  <select id="ordem" aria-label="Ordenar">
+    <option value="nome">Ordem: nome</option>
+    <option value="saldo" {{ 'selected' if request.args.get('ordem') == 'saldo' }}>Ordem: maior saldo</option>
+    <option value="menor" {{ 'selected' if request.args.get('ordem') == 'menor' }}>Ordem: menor saldo</option>
+  </select>
+</div>
+<p class="contagem" id="contagem"></p>
+
+<ul class="lista lista-clientes" id="lista">
+  {% for c in clientes %}
+  <li data-busca="{{ c.nome_busca }}" data-saldo="{{ c.saldo }}">
+    <a href="{{ url_for('cliente_ver', cliente_id=c.id) }}">
+      <span class="nome">{{ c.nome }}{% if not c.ativo %} <small>(inativo)</small>{% endif %}</span>
+      <span class="saldo {{ 'devendo' if c.saldo > 0 else ('credito' if c.saldo < 0 else 'zerado') }}">
+        {% if c.saldo < 0 %}crédito {{ (-c.saldo)|reais }}{% else %}{{ c.saldo|reais }}{% endif %}
+      </span>
+    </a>
+  </li>
+  {% endfor %}
+</ul>
+<p class="vazio" id="nada" hidden>Nenhum cliente encontrado. <a href="{{ url_for('cliente_novo') }}">Cadastrar novo?</a></p>
+
+<p class="rodape-lista">
+  {% if mostrar_inativos %}<a href="{{ url_for('clientes') }}">Esconder clientes inativos</a>
+  {% else %}<a href="{{ url_for('clientes', inativos=1) }}">Mostrar também clientes inativos</a>{% endif %}
+</p>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  const filtro = document.getElementById('filtro'), soDevendo = document.getElementById('so-devendo'),
+        ordem = document.getElementById('ordem'), lista = document.getElementById('lista'),
+        nada = document.getElementById('nada'), contagem = document.getElementById('contagem');
+  const itens = Array.from(lista.children);
+  const normalizar = s => s.normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase().trim().replace(/\s+/g, ' ');
+  function atualizar() {
+    const q = normalizar(filtro.value);
+    let visiveis = 0;
+    const porNome = (a, b) => a.dataset.busca.localeCompare(b.dataset.busca);
+    const ordenados = itens.slice().sort(
+      ordem.value === 'saldo' ? (a, b) => b.dataset.saldo - a.dataset.saldo || porNome(a, b)
+      : ordem.value === 'menor' ? (a, b) => a.dataset.saldo - b.dataset.saldo || porNome(a, b)
+      : porNome);
+    for (const li of ordenados) {
+      const mostra = li.dataset.busca.includes(q) && (!soDevendo.checked || +li.dataset.saldo > 0);
+      li.hidden = !mostra; if (mostra) visiveis++;
+      lista.appendChild(li);
+    }
+    nada.hidden = visiveis > 0;
+    contagem.textContent = visiveis + (visiveis === 1 ? ' cliente' : ' clientes');
+  }
+  filtro.addEventListener('input', atualizar); soDevendo.addEventListener('change', atualizar);
+  ordem.addEventListener('change', atualizar);
+  atualizar();
+})();
+</script>
+{% endblock %}

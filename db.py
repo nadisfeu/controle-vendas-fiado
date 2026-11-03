@@ -1,0 +1,525 @@
+"""Banco de dados (SQLite) do controle de vendas fiado.
+
+Regras que este módulo garante:
+- Dinheiro é sempre guardado em centavos (inteiro), nunca em float.
+- O saldo do cliente NUNCA é guardado nem copiado: é sempre calculado como
+  saldo_inicial + compras - pagamentos. Na planilha antiga o saldo era copiado
+  de mês para mês pelo nome, e quando o nome mudava a dívida sumia calada.
+- Venda e pagamento não são apagados, são cancelados (ficam no histórico).
+- O preço do item é copiado para a venda: mudar o preço do produto depois não
+  altera vendas antigas.
+"""
+import re
+import sqlite3
+import unicodedata
+from datetime import date
+from decimal import Decimal, InvalidOperation
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS clientes (
+    id                 INTEGER PRIMARY KEY,
+    nome               TEXT NOT NULL,
+    nome_busca         TEXT NOT NULL UNIQUE,   -- sem acento/maiúscula, impede cadastro repetido
+    telefone           TEXT NOT NULL DEFAULT '',
+    observacao         TEXT NOT NULL DEFAULT '',
+    saldo_inicial      INTEGER NOT NULL DEFAULT 0,  -- centavos, trazido da planilha antiga
+    saldo_inicial_data TEXT,
+    ativo              INTEGER NOT NULL DEFAULT 1,
+    criado_em          TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+CREATE TABLE IF NOT EXISTS produtos (
+    id         INTEGER PRIMARY KEY,
+    nome       TEXT NOT NULL,
+    nome_busca TEXT NOT NULL UNIQUE,
+    preco      INTEGER NOT NULL CHECK (preco >= 0),
+    estoque    INTEGER NOT NULL DEFAULT 0,          -- pode ficar negativo: vendeu sem ter (encomenda)
+    ativo      INTEGER NOT NULL DEFAULT 1,
+    criado_em  TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+CREATE TABLE IF NOT EXISTS vendas (
+    id           INTEGER PRIMARY KEY,
+    cliente_id   INTEGER NOT NULL REFERENCES clientes(id),
+    data         TEXT NOT NULL,
+    observacao   TEXT NOT NULL DEFAULT '',
+    cancelada_em TEXT,
+    criado_em    TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+CREATE TABLE IF NOT EXISTS itens_venda (
+    id         INTEGER PRIMARY KEY,
+    venda_id   INTEGER NOT NULL REFERENCES vendas(id),
+    produto_id INTEGER REFERENCES produtos(id),   -- NULL = item avulso
+    descricao  TEXT NOT NULL,
+    quantidade INTEGER NOT NULL CHECK (quantidade > 0),
+    preco_unit INTEGER NOT NULL CHECK (preco_unit >= 0),   -- por quanto foi vendido (cada)
+    preco_tabela INTEGER                                    -- preço normal do produto na hora; NULL = avulso
+);
+CREATE TABLE IF NOT EXISTS pagamentos (
+    id           INTEGER PRIMARY KEY,
+    cliente_id   INTEGER NOT NULL REFERENCES clientes(id),
+    data         TEXT NOT NULL,
+    valor        INTEGER NOT NULL CHECK (valor > 0),
+    forma        TEXT NOT NULL DEFAULT '',
+    observacao   TEXT NOT NULL DEFAULT '',
+    cancelado_em TEXT,
+    criado_em    TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+CREATE INDEX IF NOT EXISTS ix_vendas_cliente ON vendas(cliente_id);
+CREATE INDEX IF NOT EXISTS ix_itens_venda ON itens_venda(venda_id);
+CREATE INDEX IF NOT EXISTS ix_pagamentos_cliente ON pagamentos(cliente_id);
+"""
+
+FORMAS_PAGAMENTO = ["Dinheiro", "Pix", "Cartão", "Outro"]
+
+
+class ErroDeCadastro(ValueError):
+    """Erro com mensagem pronta para mostrar na tela."""
+
+
+def conectar(caminho):
+    con = sqlite3.connect(caminho)
+    con.row_factory = sqlite3.Row
+    con.execute("PRAGMA foreign_keys = ON")
+    con.executescript(SCHEMA)
+    _atualizar_banco_antigo(con)
+    return con
+
+
+def _atualizar_banco_antigo(con):
+    """Acrescenta colunas criadas depois da primeira versão, sem perder dados."""
+    colunas = {r["name"] for r in con.execute("PRAGMA table_info(produtos)")}
+    if "estoque" not in colunas:
+        with con:
+            con.execute("ALTER TABLE produtos ADD COLUMN estoque INTEGER NOT NULL DEFAULT 0")
+    colunas = {r["name"] for r in con.execute("PRAGMA table_info(itens_venda)")}
+    if "preco_tabela" not in colunas:
+        with con:
+            con.execute("ALTER TABLE itens_venda ADD COLUMN preco_tabela INTEGER")
+
+
+# ---------------------------------------------------------------- texto e dinheiro
+
+def limpar_nome(texto):
+    return " ".join((texto or "").split())
+
+
+_PALAVRAS_MINUSCULAS = {"de", "da", "do", "das", "dos", "e"}
+
+
+def formatar_nome(texto):
+    """'MARTA  JARDIM' -> 'Marta Jardim'; 'regina filha DE ze' -> 'Regina Filha de Ze'.
+
+    Primeira letra de cada palavra maiúscula, resto minúsculo; 'de/da/do/das/dos/e' ficam minúsculos
+    (menos no começo). Só a primeira letra da palavra: 'guarda-chuva' -> 'Guarda-chuva', '(ane' -> '(Ane'.
+    """
+    palavras = limpar_nome(texto).lower().split(" ")
+    saida = []
+    for i, palavra in enumerate(palavras):
+        if i > 0 and palavra in _PALAVRAS_MINUSCULAS:
+            saida.append(palavra)
+            continue
+        letra = next((j for j, ch in enumerate(palavra) if ch.isalpha()), None)
+        saida.append(palavra if letra is None else palavra[:letra] + palavra[letra].upper() + palavra[letra + 1:])
+    return " ".join(saida)
+
+
+def normalizar(texto):
+    sem_acento = unicodedata.normalize("NFKD", texto or "").encode("ascii", "ignore").decode()
+    return " ".join(sem_acento.lower().split())
+
+
+def reais_para_centavos(texto):
+    """'12,50' / '1.234,56' / 'R$ 10' / '12.5' -> centavos. Erro claro se não for valor."""
+    if isinstance(texto, int):
+        return texto * 100
+    s = (texto or "").strip().replace("R$", "").replace(" ", "")
+    if not s:
+        raise ErroDeCadastro("Informe um valor.")
+    if "," in s:
+        s = s.replace(".", "").replace(",", ".")
+    elif re.fullmatch(r"\d{1,3}(\.\d{3})+", s):
+        s = s.replace(".", "")          # '1.234' é mil duzentos e trinta e quatro
+    try:
+        valor = Decimal(s)
+    except InvalidOperation:
+        raise ErroDeCadastro(f'"{texto}" não é um valor válido. Use, por exemplo, 12,50.')
+    if valor != valor.quantize(Decimal("0.01")):
+        raise ErroDeCadastro(f'"{texto}" tem mais de 2 casas depois da vírgula.')
+    return int(valor * 100)
+
+
+def centavos_para_reais(centavos):
+    sinal = "-" if centavos < 0 else ""
+    inteiro, resto = divmod(abs(int(centavos)), 100)
+    return f"{sinal}R$ {inteiro:,}".replace(",", ".") + f",{resto:02d}"
+
+
+def centavos_para_campo(centavos):
+    """Valor para preencher um campo de formulário: 1250 -> '12,50'."""
+    return f"{centavos / 100:.2f}".replace(".", ",")
+
+
+def ler_quantidade(texto, permitir_negativo=False):
+    """'10' -> 10. Erro claro se não for número inteiro."""
+    s = str(texto if texto is not None else "").strip()
+    if not s:
+        return 0
+    try:
+        n = int(s)
+    except ValueError:
+        raise ErroDeCadastro(f'"{texto}" não é uma quantidade válida. Use um número inteiro, por exemplo 10.')
+    if n < 0 and not permitir_negativo:
+        raise ErroDeCadastro("A quantidade não pode ser negativa.")
+    return n
+
+
+def validar_data(texto):
+    try:
+        return date.fromisoformat(texto).isoformat()
+    except (TypeError, ValueError):
+        raise ErroDeCadastro("Data inválida.")
+
+
+# ---------------------------------------------------------------- clientes
+
+def _checar_nome_livre(con, tabela, nome, ignorar_id=None):
+    linha = con.execute(f"SELECT id, nome FROM {tabela} WHERE nome_busca = ?",
+                        (normalizar(nome),)).fetchone()
+    if linha and linha["id"] != ignorar_id:
+        oque = "um cliente" if tabela == "clientes" else "um produto"
+        raise ErroDeCadastro(f'Já existe {oque} chamado "{linha["nome"]}".')
+
+
+def criar_cliente(con, nome, telefone="", observacao="", saldo_inicial=0, saldo_inicial_data=None):
+    nome = formatar_nome(nome)
+    if not nome:
+        raise ErroDeCadastro("O nome do cliente é obrigatório.")
+    _checar_nome_livre(con, "clientes", nome)
+    with con:
+        cur = con.execute(
+            "INSERT INTO clientes (nome, nome_busca, telefone, observacao, saldo_inicial, saldo_inicial_data)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            (nome, normalizar(nome), telefone.strip(), observacao.strip(), saldo_inicial, saldo_inicial_data))
+    return cur.lastrowid
+
+
+def atualizar_cliente(con, cliente_id, nome, telefone, observacao, saldo_inicial, ativo):
+    nome = formatar_nome(nome)
+    if not nome:
+        raise ErroDeCadastro("O nome do cliente é obrigatório.")
+    _checar_nome_livre(con, "clientes", nome, ignorar_id=cliente_id)
+    with con:
+        con.execute(
+            "UPDATE clientes SET nome=?, nome_busca=?, telefone=?, observacao=?, saldo_inicial=?, ativo=?"
+            " WHERE id=?",
+            (nome, normalizar(nome), telefone.strip(), observacao.strip(), saldo_inicial, int(ativo), cliente_id))
+
+
+_SQL_SALDOS = """
+SELECT c.*,
+       COALESCE(v.comprado, 0) AS comprado,
+       COALESCE(p.pago, 0)     AS pago,
+       c.saldo_inicial + COALESCE(v.comprado, 0) - COALESCE(p.pago, 0) AS saldo,
+       v.ultima_compra, p.ultimo_pagamento
+FROM clientes c
+LEFT JOIN (SELECT ve.cliente_id, SUM(i.quantidade * i.preco_unit) AS comprado, MAX(ve.data) AS ultima_compra
+           FROM vendas ve JOIN itens_venda i ON i.venda_id = ve.id
+           WHERE ve.cancelada_em IS NULL GROUP BY ve.cliente_id) v ON v.cliente_id = c.id
+LEFT JOIN (SELECT cliente_id, SUM(valor) AS pago, MAX(data) AS ultimo_pagamento
+           FROM pagamentos WHERE cancelado_em IS NULL GROUP BY cliente_id) p ON p.cliente_id = c.id
+"""
+
+
+def padronizar_nomes_clientes(con):
+    """Aplica formatar_nome a todos os clientes. Devolve [(antes, depois)] dos que mudaram."""
+    mudancas = [(r["id"], r["nome"], formatar_nome(r["nome"]))
+                for r in con.execute("SELECT id, nome FROM clientes ORDER BY nome_busca")]
+    mudancas = [m for m in mudancas if m[1] != m[2]]
+    with con:
+        # nome_busca não muda (já ignora maiúscula e acento), então não há risco de nome repetido
+        con.executemany("UPDATE clientes SET nome = ? WHERE id = ?", [(depois, i) for i, _, depois in mudancas])
+    return [(antes, depois) for _, antes, depois in mudancas]
+
+
+def saldos(con, apenas_ativos=True):
+    where = " WHERE c.ativo = 1" if apenas_ativos else ""
+    return con.execute(_SQL_SALDOS + where + " ORDER BY c.nome_busca").fetchall()
+
+
+def cliente(con, cliente_id):
+    linha = con.execute(_SQL_SALDOS + " WHERE c.id = ?", (cliente_id,)).fetchone()
+    if linha is None:
+        raise ErroDeCadastro("Cliente não encontrado.")
+    return linha
+
+
+def extrato(con, cliente_id):
+    """Compras e pagamentos do cliente, do mais novo para o mais antigo, com o saldo após cada um."""
+    c = cliente(con, cliente_id)
+    linhas = []
+    if c["saldo_inicial"]:
+        linhas.append(dict(tipo="inicial", id=None, data=c["saldo_inicial_data"] or "", criado_em="",
+                           valor=c["saldo_inicial"], cancelado=False, itens=[], observacao="",
+                           descricao="Saldo trazido da planilha antiga"))
+    itens = {}
+    for i in con.execute("SELECT i.* FROM itens_venda i JOIN vendas v ON v.id = i.venda_id"
+                         " WHERE v.cliente_id = ? ORDER BY i.id", (cliente_id,)):
+        itens.setdefault(i["venda_id"], []).append(i)
+    for v in con.execute("SELECT * FROM vendas WHERE cliente_id = ?", (cliente_id,)):
+        its = itens.get(v["id"], [])
+        linhas.append(dict(tipo="venda", id=v["id"], data=v["data"], criado_em=v["criado_em"],
+                           valor=sum(i["quantidade"] * i["preco_unit"] for i in its),
+                           cancelado=v["cancelada_em"] is not None, itens=its, observacao=v["observacao"],
+                           descricao=", ".join(f'{i["quantidade"]}× {i["descricao"]}' for i in its)))
+    for p in con.execute("SELECT * FROM pagamentos WHERE cliente_id = ?", (cliente_id,)):
+        linhas.append(dict(tipo="pagamento", id=p["id"], data=p["data"], criado_em=p["criado_em"],
+                           valor=p["valor"], cancelado=p["cancelado_em"] is not None, itens=[],
+                           observacao=p["observacao"],
+                           descricao="Pagamento" + (f' ({p["forma"]})' if p["forma"] else "")))
+    ordem_tipo = {"inicial": 0, "venda": 1, "pagamento": 2}
+    linhas.sort(key=lambda l: (l["data"], l["criado_em"], ordem_tipo[l["tipo"]]))
+    saldo = 0
+    for l in linhas:
+        if not l["cancelado"]:
+            saldo += -l["valor"] if l["tipo"] == "pagamento" else l["valor"]
+        l["saldo_apos"] = saldo
+    if saldo != c["saldo"]:
+        raise RuntimeError(f"Extrato do cliente {cliente_id} não fecha: {saldo} != {c['saldo']}")
+    return list(reversed(linhas))
+
+
+# ---------------------------------------------------------------- produtos
+
+def criar_produto(con, nome, preco, estoque=0):
+    nome = limpar_nome(nome)
+    if not nome:
+        raise ErroDeCadastro("O nome do produto é obrigatório.")
+    _checar_nome_livre(con, "produtos", nome)
+    with con:
+        cur = con.execute("INSERT INTO produtos (nome, nome_busca, preco, estoque) VALUES (?, ?, ?, ?)",
+                          (nome, normalizar(nome), preco, estoque))
+    return cur.lastrowid
+
+
+def atualizar_produto(con, produto_id, nome, preco, ativo, estoque=None):
+    """estoque=None mantém o estoque como está."""
+    nome = limpar_nome(nome)
+    if not nome:
+        raise ErroDeCadastro("O nome do produto é obrigatório.")
+    _checar_nome_livre(con, "produtos", nome, ignorar_id=produto_id)
+    with con:
+        con.execute("UPDATE produtos SET nome=?, nome_busca=?, preco=?, ativo=?, estoque=COALESCE(?, estoque)"
+                    " WHERE id=?", (nome, normalizar(nome), preco, int(ativo), estoque, produto_id))
+
+
+def adicionar_estoque(con, produto_id, quantidade):
+    """Entrada de mercadoria: soma ao estoque atual."""
+    produto(con, produto_id)
+    if quantidade <= 0:
+        raise ErroDeCadastro("Informe quantas unidades chegaram (maior que zero).")
+    with con:
+        con.execute("UPDATE produtos SET estoque = estoque + ? WHERE id = ?", (quantidade, produto_id))
+
+
+def produto(con, produto_id):
+    linha = con.execute("SELECT * FROM produtos WHERE id = ?", (produto_id,)).fetchone()
+    if linha is None:
+        raise ErroDeCadastro("Produto não encontrado.")
+    return linha
+
+
+def produtos(con, apenas_ativos=True):
+    where = " WHERE ativo = 1" if apenas_ativos else ""
+    return con.execute("SELECT * FROM produtos" + where + " ORDER BY ativo DESC, nome_busca").fetchall()
+
+
+# ---------------------------------------------------------------- vendas e pagamentos
+
+def registrar_venda(con, cliente_id, data, itens, observacao=""):
+    """itens: lista de dicts com produto_id (ou None), descricao, quantidade, preco_unit (centavos)."""
+    cliente(con, cliente_id)
+    data = validar_data(data)
+    if not itens:
+        raise ErroDeCadastro("Adicione pelo menos um produto à venda.")
+    limpos = []
+    for it in itens:
+        descricao, preco_tabela = limpar_nome(it.get("descricao")), None
+        if it.get("produto_id") is not None:
+            p = produto(con, it["produto_id"])
+            descricao, preco_tabela = p["nome"], p["preco"]   # preço normal vem do cadastro, não da tela
+        if not descricao:
+            raise ErroDeCadastro("Todo item precisa de uma descrição.")
+        qtd, preco = it.get("quantidade"), it.get("preco_unit")
+        if not isinstance(qtd, int) or qtd < 1:
+            raise ErroDeCadastro(f'Quantidade inválida em "{descricao}".')
+        if not isinstance(preco, int) or preco < 0:
+            raise ErroDeCadastro(f'Preço inválido em "{descricao}".')
+        limpos.append((it.get("produto_id"), descricao, qtd, preco, preco_tabela))
+    with con:
+        venda_id = con.execute("INSERT INTO vendas (cliente_id, data, observacao) VALUES (?, ?, ?)",
+                               (cliente_id, data, observacao.strip())).lastrowid
+        con.executemany("INSERT INTO itens_venda (venda_id, produto_id, descricao, quantidade, preco_unit, preco_tabela)"
+                        " VALUES (?, ?, ?, ?, ?, ?)", [(venda_id, *l) for l in limpos])
+        con.executemany("UPDATE produtos SET estoque = estoque - ? WHERE id = ?",
+                        [(qtd, pid) for pid, _, qtd, *_ in limpos if pid is not None])
+    return venda_id
+
+
+def registrar_pagamento(con, cliente_id, data, valor, forma="", observacao=""):
+    cliente(con, cliente_id)
+    data = validar_data(data)
+    if valor <= 0:
+        raise ErroDeCadastro("O valor do pagamento precisa ser maior que zero.")
+    with con:
+        return con.execute("INSERT INTO pagamentos (cliente_id, data, valor, forma, observacao)"
+                           " VALUES (?, ?, ?, ?, ?)",
+                           (cliente_id, data, valor, forma, observacao.strip())).lastrowid
+
+
+def cancelar_venda(con, venda_id):
+    """Cancela e devolve ao estoque os produtos da venda."""
+    with con:
+        cur = con.execute("UPDATE vendas SET cancelada_em = datetime('now', 'localtime')"
+                          " WHERE id = ? AND cancelada_em IS NULL", (venda_id,))
+        if cur.rowcount != 1:
+            raise ErroDeCadastro("Venda não encontrada ou já cancelada.")
+        con.execute("UPDATE produtos SET estoque = estoque + (SELECT SUM(i.quantidade) FROM itens_venda i"
+                    " WHERE i.venda_id = :v AND i.produto_id = produtos.id)"
+                    " WHERE id IN (SELECT produto_id FROM itens_venda WHERE venda_id = :v)", {"v": venda_id})
+
+
+def cancelar_pagamento(con, pagamento_id):
+    with con:
+        cur = con.execute("UPDATE pagamentos SET cancelado_em = datetime('now', 'localtime')"
+                          " WHERE id = ? AND cancelado_em IS NULL", (pagamento_id,))
+    if cur.rowcount != 1:
+        raise ErroDeCadastro("Pagamento não encontrado ou já cancelado.")
+
+
+def cliente_da_venda(con, venda_id):
+    linha = con.execute("SELECT cliente_id FROM vendas WHERE id = ?", (venda_id,)).fetchone()
+    if linha is None:
+        raise ErroDeCadastro("Venda não encontrada.")
+    return linha["cliente_id"]
+
+
+def cliente_do_pagamento(con, pagamento_id):
+    linha = con.execute("SELECT cliente_id FROM pagamentos WHERE id = ?", (pagamento_id,)).fetchone()
+    if linha is None:
+        raise ErroDeCadastro("Pagamento não encontrado.")
+    return linha["cliente_id"]
+
+
+# ---------------------------------------------------------------- relatórios
+
+def resumo_mes(con, ano_mes):
+    """ano_mes = 'AAAA-MM'. Total vendido e recebido no mês (sem cancelados)."""
+    vendido = con.execute("SELECT COALESCE(SUM(i.quantidade * i.preco_unit), 0) FROM vendas v"
+                          " JOIN itens_venda i ON i.venda_id = v.id"
+                          " WHERE v.cancelada_em IS NULL AND substr(v.data, 1, 7) = ?", (ano_mes,)).fetchone()[0]
+    recebido = con.execute("SELECT COALESCE(SUM(valor), 0) FROM pagamentos"
+                           " WHERE cancelado_em IS NULL AND substr(data, 1, 7) = ?", (ano_mes,)).fetchone()[0]
+    descontos = con.execute("SELECT COALESCE(SUM(i.quantidade * (i.preco_tabela - i.preco_unit)), 0) FROM vendas v"
+                            " JOIN itens_venda i ON i.venda_id = v.id"
+                            " WHERE v.cancelada_em IS NULL AND substr(v.data, 1, 7) = ?"
+                            " AND i.preco_tabela > i.preco_unit", (ano_mes,)).fetchone()[0]
+    return dict(vendido=vendido, recebido=recebido, descontos=descontos)
+
+
+def movimento_clientes_mes(con, ano_mes):
+    return con.execute("""
+        SELECT c.id, c.nome, COALESCE(v.comprado, 0) AS comprado, COALESCE(p.pago, 0) AS pago
+        FROM clientes c
+        LEFT JOIN (SELECT ve.cliente_id, SUM(i.quantidade * i.preco_unit) AS comprado
+                   FROM vendas ve JOIN itens_venda i ON i.venda_id = ve.id
+                   WHERE ve.cancelada_em IS NULL AND substr(ve.data, 1, 7) = :m
+                   GROUP BY ve.cliente_id) v ON v.cliente_id = c.id
+        LEFT JOIN (SELECT cliente_id, SUM(valor) AS pago FROM pagamentos
+                   WHERE cancelado_em IS NULL AND substr(data, 1, 7) = :m
+                   GROUP BY cliente_id) p ON p.cliente_id = c.id
+        WHERE v.comprado IS NOT NULL OR p.pago IS NOT NULL
+        ORDER BY comprado DESC, pago DESC""", {"m": ano_mes}).fetchall()
+
+
+MESES = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro",
+         "outubro", "novembro", "dezembro"]
+
+
+def limites_mes(ano_mes):
+    """'2026-11' -> ('2026-11-01', '2026-12-01'): o mês é data >= início e data < fim."""
+    inicio = date.fromisoformat(ano_mes + "-01")
+    fim = date(inicio.year + (inicio.month == 12), inicio.month % 12 + 1, 1)
+    return inicio.isoformat(), fim.isoformat()
+
+
+def nome_mes(ano_mes):
+    return f"{MESES[int(ano_mes[5:7]) - 1]} de {ano_mes[:4]}"
+
+
+# O saldo da planilha antiga conta como "saldo anterior" a partir do mês da importação
+# (ele é o saldo de fechamento do mês anterior); antes disso o sistema não tem dados.
+_SQL_RESUMO_CLIENTES = """
+SELECT c.id, c.nome, c.ativo,
+       (CASE WHEN c.saldo_inicial_data IS NULL OR c.saldo_inicial_data < :fim THEN c.saldo_inicial ELSE 0 END)
+       + COALESCE((SELECT SUM(i.quantidade * i.preco_unit) FROM vendas v JOIN itens_venda i ON i.venda_id = v.id
+                   WHERE v.cliente_id = c.id AND v.cancelada_em IS NULL AND v.data < :inicio), 0)
+       - COALESCE((SELECT SUM(valor) FROM pagamentos p
+                   WHERE p.cliente_id = c.id AND p.cancelado_em IS NULL AND p.data < :inicio), 0) AS anterior,
+       COALESCE((SELECT SUM(i.quantidade * i.preco_unit) FROM vendas v JOIN itens_venda i ON i.venda_id = v.id
+                 WHERE v.cliente_id = c.id AND v.cancelada_em IS NULL
+                   AND v.data >= :inicio AND v.data < :fim), 0) AS comprou,
+       COALESCE((SELECT SUM(valor) FROM pagamentos p
+                 WHERE p.cliente_id = c.id AND p.cancelado_em IS NULL
+                   AND p.data >= :inicio AND p.data < :fim), 0) AS pagou
+FROM clientes c
+"""
+
+
+def resumo_clientes_mes(con, ano_mes, cliente_id=None):
+    """Por cliente: saldo anterior, comprou e pagou no mês, saldo no fim do mês (as colunas da planilha antiga)."""
+    inicio, fim = limites_mes(ano_mes)
+    where = " WHERE c.id = :cliente" if cliente_id is not None else ""
+    linhas = []
+    for r in con.execute(_SQL_RESUMO_CLIENTES + where + " ORDER BY c.nome_busca",
+                         {"inicio": inicio, "fim": fim, "cliente": cliente_id}):
+        d = dict(r)
+        d["final"] = d["anterior"] + d["comprou"] - d["pagou"]
+        linhas.append(d)
+    return linhas
+
+
+def extrato_mes(con, cliente_id, ano_mes):
+    """Extrato de um cliente num mês: saldo anterior, compras e pagamentos (sem cancelados), saldo final."""
+    resumo = resumo_clientes_mes(con, ano_mes, cliente_id)
+    if not resumo:
+        raise ErroDeCadastro("Cliente não encontrado.")
+    resumo = resumo[0]
+    inicio, fim = limites_mes(ano_mes)
+    linhas = [l for l in reversed(extrato(con, cliente_id))
+              if l["tipo"] != "inicial" and not l["cancelado"] and inicio <= l["data"] < fim]
+    saldo = resumo["anterior"]
+    for l in linhas:
+        saldo += -l["valor"] if l["tipo"] == "pagamento" else l["valor"]
+        l["saldo_apos"] = saldo
+    if saldo != resumo["final"]:
+        raise RuntimeError(f"Extrato do mês {ano_mes} do cliente {cliente_id} não fecha: {saldo} != {resumo['final']}")
+    return dict(resumo, linhas=linhas)
+
+
+def vendas_por_produto_mes(con, ano_mes):
+    return con.execute("""
+        SELECT i.descricao, SUM(i.quantidade) AS quantidade, SUM(i.quantidade * i.preco_unit) AS total
+        FROM itens_venda i JOIN vendas v ON v.id = i.venda_id
+        WHERE v.cancelada_em IS NULL AND substr(v.data, 1, 7) = ?
+        GROUP BY i.descricao ORDER BY total DESC""", (ano_mes,)).fetchall()
+
+
+def ultimos_lancamentos(con, limite=10):
+    return con.execute("""
+        SELECT * FROM (
+            SELECT 'venda' AS tipo, v.data, v.criado_em, c.id AS cliente_id, c.nome,
+                   (SELECT SUM(quantidade * preco_unit) FROM itens_venda WHERE venda_id = v.id) AS valor
+            FROM vendas v JOIN clientes c ON c.id = v.cliente_id WHERE v.cancelada_em IS NULL
+            UNION ALL
+            SELECT 'pagamento', p.data, p.criado_em, c.id, c.nome, p.valor
+            FROM pagamentos p JOIN clientes c ON c.id = p.cliente_id WHERE p.cancelado_em IS NULL
+        ) ORDER BY criado_em DESC LIMIT ?""", (limite,)).fetchall()

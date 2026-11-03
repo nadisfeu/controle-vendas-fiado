@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block titulo %}Relatórios{% endblock %}
+{% block conteudo %}
+<h1>Relatórios</h1>
+<details class="ajuda">
+  <summary>Como usar</summary>
+  <p>Escolha o mês para ver quanto foi vendido e recebido, por cliente e por produto.
+  O total a receber de todos os clientes fica na tela de <b>Início</b>.</p>
+  <p><b>Imprimir resumo do mês</b> abre uma folha pronta com o saldo anterior, compras, pagamentos e saldo final
+  de cada cliente. Para o extrato de um cliente só, abra o cliente e use <b>Imprimir extrato</b>.</p>
+  <p><b>Baixar planilha Excel</b> gera uma cópia de tudo para abrir no Excel. <b>Baixar backup</b> gera uma
+  cópia completa do banco de dados. Faça backup de vez em quando e guarde em outro lugar (pendrive, e-mail, nuvem).</p>
+</details>
+
+<form method="get" class="filtros filtros-mes">
+  <label>Mês <input type="month" name="mes" value="{{ mes }}" onchange="this.form.submit()"></label>
+  <a class="botao botao-principal" href="{{ url_for('imprimir_mes', mes=mes) }}">🖨️ Imprimir resumo do mês</a>
+</form>
+
+<section class="indicadores">
+  <div class="indicador"><span class="rotulo">Vendido no mês</span><span class="valor">{{ resumo.vendido|reais }}</span></div>
+  <div class="indicador"><span class="rotulo">Recebido no mês</span><span class="valor">{{ resumo.recebido|reais }}</span></div>
+  <div class="indicador"><span class="rotulo">Descontos dados no mês</span><span class="valor">{{ resumo.descontos|reais }}</span>
+    <span class="nota">diferença entre o preço normal e o vendido</span></div>
+</section>
+
+<div class="duas-colunas">
+  <section class="cartao">
+    <h2>Por cliente</h2>
+    {% if clientes %}
+    <table class="tabela">
+      <thead><tr><th>Cliente</th><th>Comprou</th><th>Pagou</th></tr></thead>
+      <tbody>
+      {% for c in clientes %}
+      <tr><td><a href="{{ url_for('cliente_ver', cliente_id=c.id) }}">{{ c.nome }}</a></td>
+          <td>{{ c.comprado|reais }}</td><td>{{ c.pago|reais }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<p class="vazio">Nenhum lançamento neste mês.</p>{% endif %}
+  </section>
+  <section class="cartao">
+    <h2>Por produto</h2>
+    {% if produtos %}
+    <table class="tabela">
+      <thead><tr><th>Produto</th><th>Qtd.</th><th>Total</th></tr></thead>
+      <tbody>
+      {% for p in produtos %}<tr><td>{{ p.descricao }}</td><td>{{ p.quantidade }}</td><td>{{ p.total|reais }}</td></tr>{% endfor %}
+      </tbody>
+    </table>
+    {% else %}<p class="vazio">Nenhuma venda neste mês.</p>{% endif %}
+  </section>
+</div>
+
+<section class="cartao">
+  <h2>Cópias de segurança</h2>
+  <div class="acoes">
+    <a class="botao" href="{{ url_for('exportar') }}">📊 Baixar planilha Excel</a>
+    <a class="botao" href="{{ url_for('backup') }}">💾 Baixar backup completo</a>
+  </div>
+</section>
+{% endblock %}

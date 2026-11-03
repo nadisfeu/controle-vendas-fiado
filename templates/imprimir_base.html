@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block titulo %}{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='impressao.css') }}">
+</head>
+<body>
+  <div class="barra nao-imprimir">
+    <a class="voltar" href="{% block voltar %}{% endblock %}">← Voltar</a>
+    <form method="get" class="escolha">
+      <label>Mês <input type="month" name="mes" value="{{ mes }}" onchange="this.form.submit()"></label>
+      {% block escolhas %}{% endblock %}
+    </form>
+    <button class="imprimir" type="button" onclick="window.print()">🖨️ Imprimir</button>
+  </div>
+  <p class="dica nao-imprimir">Esta é a prévia da folha. Confira e toque em <b>Imprimir</b>. Para guardar no computador
+    ou mandar pelo WhatsApp, escolha <b>"Salvar como PDF"</b> como impressora.</p>
+
+  <article class="folha">
+    {% block conteudo %}{% endblock %}
+    <p class="rodape-folha">Impresso em {{ agora }} · Controle de Vendas</p>
+  </article>
+</body>
+</html>

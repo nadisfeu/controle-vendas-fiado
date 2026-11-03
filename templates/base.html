@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block titulo %}Vendas{% endblock %} · Controle de Vendas</title>
+  <script>
+    // aplica o tema escolhido antes de desenhar a página (sem piscar)
+    try { var t = localStorage.getItem('tema'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}
+  </script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='estilo.css') }}">
+</head>
+<body>
+  {% if session.logado %}
+  <header class="topo">
+    <div class="topo-esquerda">
+      <a class="marca" href="{{ url_for('inicio') }}">Controle de Vendas</a>
+      <button type="button" class="botao-tema" id="botao-tema" title="Trocar entre tema automático, claro e escuro">🌓 Automático</button>
+    </div>
+    <nav>
+      {% set ep = request.endpoint or '' %}
+      <a href="{{ url_for('inicio') }}" class="{{ 'ativo' if ep == 'inicio' }}">Início</a>
+      <a href="{{ url_for('clientes') }}" class="{{ 'ativo' if ep.startswith('cliente') or ep.startswith('venda') or ep.startswith('pagamento') }}">Clientes</a>
+      <a href="{{ url_for('produtos') }}" class="{{ 'ativo' if ep.startswith('produto') }}">Produtos</a>
+      <a href="{{ url_for('relatorios') }}" class="{{ 'ativo' if ep == 'relatorios' }}">Relatórios</a>
+    </nav>
+  </header>
+  {% endif %}
+  <main>
+    {% for categoria, msg in get_flashed_messages(with_categories=true) %}
+      <div class="aviso {{ 'aviso-erro' if categoria == 'erro' else 'aviso-ok' }}" role="status">{{ msg }}</div>
+    {% endfor %}
+    {% block conteudo %}{% endblock %}
+  </main>
+  {% if session.logado %}
+  <footer class="rodape"><a href="{{ url_for('sair') }}">Sair</a></footer>
+  {% endif %}
+  <script>
+  // Botão de tema: Automático (segue o aparelho) -> Claro -> Escuro. A escolha fica salva neste navegador.
+  (function () {
+    var botao = document.getElementById('botao-tema');
+    if (!botao) return;
+    var raiz = document.documentElement, ordem = ['auto', 'light', 'dark'],
+        rotulo = { auto: '🌓 Automático', light: '☀️ Claro', dark: '🌙 Escuro' };
+    function atual() { return raiz.dataset.theme || 'auto'; }
+    botao.addEventListener('click', function () {
+      var proximo = ordem[(ordem.indexOf(atual()) + 1) % ordem.length];
+      if (proximo === 'auto') delete raiz.dataset.theme; else raiz.dataset.theme = proximo;
+      try { if (proximo === 'auto') localStorage.removeItem('tema'); else localStorage.setItem('tema', proximo); } catch (e) {}
+      botao.textContent = rotulo[proximo];
+    });
+    botao.textContent = rotulo[atual()];
+  })();
+  // Campos de texto longo crescem sozinhos conforme a pessoa digita.
+  document.querySelectorAll('textarea').forEach(function (t) {
+    function ajustar() { t.style.height = 'auto'; t.style.height = (t.scrollHeight + t.offsetHeight - t.clientHeight) + 'px'; }
+    t.addEventListener('input', ajustar);
+    ajustar();
+  });
+  </script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

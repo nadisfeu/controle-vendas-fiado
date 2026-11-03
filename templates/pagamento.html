@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block titulo %}Pagamento · {{ c.nome }}{% endblock %}
+{% block conteudo %}
+<a class="voltar" href="{{ url_for('cliente_ver', cliente_id=c.id) }}">← {{ c.nome }}</a>
+<h1>Registrar pagamento de {{ c.nome }}</h1>
+
+<section class="saldo-grande {{ 'devendo' if c.saldo > 0 else ('credito' if c.saldo < 0 else 'zerado') }}">
+  {% if c.saldo >= 0 %}<span class="rotulo">Deve hoje</span><span class="valor">{{ c.saldo|reais }}</span>
+  {% else %}<span class="rotulo">Já tem crédito de</span><span class="valor">{{ (-c.saldo)|reais }}</span>{% endif %}
+</section>
+
+<form method="post" class="cartao formulario">
+  <label><span>Valor pago <span class="obrigatorio">*</span></span>
+    <input name="valor" id="valor" inputmode="decimal" required placeholder="ex.: 100,00"
+           value="{{ form.get('valor', '') }}" autofocus>
+  </label>
+  {% if c.saldo > 0 %}
+  <button class="botao" type="button" onclick="document.getElementById('valor').value='{{ c.saldo|campo }}'">
+    Pagou tudo ({{ c.saldo|reais }})</button>
+  {% endif %}
+  <label>Data do pagamento <input type="date" name="data" value="{{ data }}" required></label>
+  <label>Forma de pagamento
+    <select name="forma">
+      {% for f in formas %}<option {{ 'selected' if form.get('forma') == f }}>{{ f }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Observação (opcional) <input name="observacao" value="{{ form.get('observacao', '') }}"></label>
+  <p class="dica">Se pagar mais do que deve, a diferença fica como crédito e é descontada na próxima compra.</p>
+  <button class="botao botao-pagamento botao-grande" type="submit">Salvar pagamento</button>
+</form>
+{% endblock %}
