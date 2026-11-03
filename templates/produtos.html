@@ -4,33 +4,121 @@
 <h1>Produtos</h1>
 <details class="ajuda">
   <summary>Como usar</summary>
-  <p>Cadastre aqui o que você vende, com o preço normal e quantas unidades tem. Na hora da venda é só tocar no produto.</p>
+  <p>Cadastre aqui o que você vende, com o preço normal e quantas unidades tem. Na hora da venda é só tocar no produto.
+  <b>Tipo</b>, <b>marca</b> e <b>código</b> são opcionais: ajudam a achar o produto depois
+  (ex.: tipo Perfume, marca Natura, código da revista).</p>
+  <p>Para achar um produto, digite parte do <b>nome, do código, do tipo ou da marca</b>. Dá para filtrar também por
+  tipo, por marca, por estoque e por produtos desativados.</p>
+  <p>Toque num produto para ver <b>quanto ele vendeu</b> mês a mês, quem mais comprou, e para editar.</p>
   <p><b>Estoque:</b> cada venda desconta sozinha; cancelar a venda devolve. Chegou mercadoria? Toque no produto
   e use <b>"Chegou mercadoria"</b> para somar.</p>
   <p>Mudou o preço? Edite o produto: <b>as vendas antigas continuam com o preço da época</b>.
   Parou de vender? Desmarque "ativo": ele some da tela de venda, mas o histórico fica.</p>
 </details>
 
-<form method="post" class="cartao formulario em-linha">
+<form method="post" class="cartao formulario em-linha form-produto">
   <h2>Cadastrar produto</h2>
-  <label>Nome <input name="nome" required value="{{ form.get('nome', '') }}" placeholder="ex.: Perfume 100 ml"></label>
+  <label><span>Tipo <small>(opcional)</small></span> <input name="tipo" list="lista-tipos" value="{{ form.get('tipo', '') }}" placeholder="ex.: Perfume" autocomplete="off"></label>
+  <label><span>Marca <small>(opcional)</small></span> <input name="marca" list="lista-marcas" value="{{ form.get('marca', '') }}" placeholder="ex.: Natura" autocomplete="off"></label>
+  <label>Nome <input name="nome" required value="{{ form.get('nome', '') }}" placeholder="ex.: Essencial Clássico 100 ml"></label>
+  <label><span>Código <small>(opcional)</small></span> <input name="codigo" value="{{ form.get('codigo', '') }}" placeholder="ex.: 73455" autocomplete="off"></label>
   <label>Preço <input name="preco" inputmode="decimal" required value="{{ form.get('preco', '') }}" placeholder="ex.: 89,90"></label>
   <label>Quantidade <input name="estoque" inputmode="numeric" value="{{ form.get('estoque', '') }}" placeholder="ex.: 10"></label>
   <button class="botao botao-principal" type="submit">Adicionar</button>
 </form>
+<datalist id="lista-marcas">{% for m in marcas %}<option value="{{ m }}">{% endfor %}</datalist>
+<datalist id="lista-tipos">{% for x in tipos %}<option value="{{ x }}">{% endfor %}</datalist>
+
+<div class="filtros filtros-produtos">
+  <input type="search" id="filtro" placeholder="Buscar por nome, código, tipo ou marca…" aria-label="Buscar produto">
+  <select id="filtro-tipo" aria-label="Filtrar por tipo">
+    <option value="">Tipo: todos</option>
+    {% for x in tipos %}<option value="{{ x|lower }}">Tipo: {{ x }}</option>{% endfor %}
+    <option value="-">Sem tipo</option>
+  </select>
+  <select id="filtro-marca" aria-label="Filtrar por marca">
+    <option value="">Marca: todas</option>
+    {% for m in marcas %}<option value="{{ m|lower }}">Marca: {{ m }}</option>{% endfor %}
+    <option value="-">Sem marca</option>
+  </select>
+  <select id="filtro-estoque" aria-label="Filtrar por estoque">
+    <option value="">Estoque: todos</option>
+    <option value="com">Com estoque</option>
+    <option value="sem">Sem estoque</option>
+  </select>
+  <select id="filtro-situacao" aria-label="Quais produtos mostrar">
+    <option value="ativos">Mostrar: ativos</option>
+    <option value="desativados">Mostrar: só desativados</option>
+    <option value="todos">Mostrar: todos</option>
+  </select>
+  <select id="ordem" aria-label="Ordenar">
+    <option value="nome">Ordem: nome</option>
+    <option value="tipo">Ordem: tipo</option>
+    <option value="marca">Ordem: marca</option>
+    <option value="estoque">Ordem: menor estoque</option>
+    <option value="preco">Ordem: maior preço</option>
+  </select>
+</div>
+<p class="contagem" id="contagem"></p>
 
 <section class="cartao">
-  <h2>{{ produtos|length }} produto{{ 's' if produtos|length != 1 }}</h2>
   {% if produtos %}
-  <ul class="lista">
+  <ul class="lista lista-produtos" id="lista">
     {% for p in produtos %}
-    <li class="{{ 'inativo' if not p.ativo }}">
-      <a href="{{ url_for('produto_editar', produto_id=p.id) }}">{{ p.nome }}{% if not p.ativo %} <small>(inativo)</small>{% endif %}</a>
+    <li class="{{ 'inativo' if not p.ativo }}" data-busca="{{ p.nome_busca }} {{ (p.codigo or '')|lower }} {{ p.marca|lower }} {{ p.tipo|lower }}"
+        data-nome="{{ p.nome_busca }}" data-marca="{{ p.marca|lower }}" data-tipo="{{ p.tipo|lower }}" data-estoque="{{ p.estoque }}"
+        data-preco="{{ p.preco }}" data-ativo="{{ p.ativo }}">
+      <span class="produto-nome">
+        <a href="{{ url_for('produto_ver', produto_id=p.id) }}">{{ p.nome }}</a>{% if not p.ativo %} <small>(desativado)</small>{% endif %}
+        {% set extra = [p.tipo, p.marca, ('cód. ' ~ p.codigo) if p.codigo else ''] | select | join(' · ') %}
+        {% if extra %}<small class="produto-extra">{{ extra }}</small>{% endif %}
+      </span>
       <span class="produto-info">{{ p.preco|reais }}
         <small class="{{ 'devendo' if p.estoque <= 0 }}">{% if p.estoque > 0 %}{{ p.estoque }} em estoque{% elif p.estoque == 0 %}sem estoque{% else %}faltam {{ -p.estoque }}{% endif %}</small></span>
     </li>
     {% endfor %}
   </ul>
+  <p class="vazio" id="nada" hidden>Nenhum produto com esses filtros.</p>
   {% else %}<p class="vazio">Nenhum produto cadastrado ainda.</p>{% endif %}
 </section>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  const lista = document.getElementById('lista');
+  if (!lista) return;
+  const $ = id => document.getElementById(id);
+  const itens = Array.from(lista.children);
+  const normalizar = s => s.normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase().trim().replace(/\s+/g, ' ');
+  const ordens = {
+    nome: (a, b) => a.dataset.nome.localeCompare(b.dataset.nome),
+    marca: (a, b) => (a.dataset.marca || '\uffff').localeCompare(b.dataset.marca || '\uffff') || ordens.nome(a, b),
+    tipo: (a, b) => (a.dataset.tipo || '\uffff').localeCompare(b.dataset.tipo || '\uffff') || ordens.nome(a, b),
+    estoque: (a, b) => a.dataset.estoque - b.dataset.estoque || ordens.nome(a, b),
+    preco: (a, b) => b.dataset.preco - a.dataset.preco || ordens.nome(a, b),
+  };
+  function atualizar() {
+    const q = normalizar($('filtro').value), marca = $('filtro-marca').value, estoque = $('filtro-estoque').value,
+          tipo = $('filtro-tipo').value,
+          situacao = $('filtro-situacao').value;
+    let visiveis = 0;
+    for (const li of itens.slice().sort(ordens[$('ordem').value])) {
+      const ativo = li.dataset.ativo === '1', qtd = +li.dataset.estoque;
+      const mostra = normalizar(li.dataset.busca).includes(q)
+        && (!marca || (marca === '-' ? !li.dataset.marca : li.dataset.marca === marca))
+        && (!tipo || (tipo === '-' ? !li.dataset.tipo : li.dataset.tipo === tipo))
+        && (!estoque || (estoque === 'com' ? qtd > 0 : qtd <= 0))
+        && (situacao === 'todos' || ativo === (situacao === 'ativos'));
+      li.hidden = !mostra;
+      if (mostra) visiveis++;
+      lista.appendChild(li);
+    }
+    $('nada').hidden = visiveis > 0;
+    $('contagem').textContent = visiveis + (visiveis === 1 ? ' produto' : ' produtos');
+  }
+  ['filtro', 'filtro-tipo', 'filtro-marca', 'filtro-estoque', 'filtro-situacao', 'ordem'].forEach(id =>
+    $(id).addEventListener(id === 'filtro' ? 'input' : 'change', atualizar));
+  atualizar();
+})();
+</script>
 {% endblock %}

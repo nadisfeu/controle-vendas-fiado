@@ -4,6 +4,9 @@
 <h1>Relatórios</h1>
 <details class="ajuda">
   <summary>Como usar</summary>
+  <p><b>Vendas por dia</b> mostra, em colunas, quanto vendeu em cada dia do mês escolhido.
+  <b>Melhor dia de cada mês</b> mostra o ano todo: uma linha por mês, um quadradinho por dia, e no fim da
+  linha o dia que mais vendeu.</p>
   <p>Escolha o mês para ver quanto foi vendido e recebido, por cliente e por produto.
   O total a receber de todos os clientes fica na tela de <b>Início</b>.</p>
   <p><b>Imprimir resumo do mês</b> abre uma folha pronta com o saldo anterior, compras, pagamentos e saldo final
@@ -22,6 +25,81 @@
   <div class="indicador"><span class="rotulo">Recebido no mês</span><span class="valor">{{ resumo.recebido|reais }}</span></div>
   <div class="indicador"><span class="rotulo">Descontos dados no mês</span><span class="valor">{{ resumo.descontos|reais }}</span>
     <span class="nota">diferença entre o preço normal e o vendido</span></div>
+</section>
+
+<section class="cartao grafico">
+  <h2>Vendas por dia · {{ nome_mes }}</h2>
+  {% if grafico.melhor %}
+  <p class="resumo-grafico">
+    Dia que mais vendeu: <b>dia {{ grafico.melhor.dia }} ({{ grafico.melhor.semana }}), {{ grafico.melhor.total|reais }}</b>.
+    {% if grafico.pior %}Que menos vendeu: <b>dia {{ grafico.pior.dia }} ({{ grafico.pior.semana }}), {{ grafico.pior.total|reais }}</b>.{% endif %}
+    {% if grafico.sem_venda %}{{ grafico.sem_venda }} dia{{ 's' if grafico.sem_venda > 1 }} sem venda.{% endif %}
+  </p>
+  <div class="grafico-colunas" id="grafico-mes" role="img"
+       aria-label="Colunas com o total vendido em cada dia de {{ nome_mes }}. Os mesmos valores estão em Ver em tabela."></div>
+  <p class="dica">Cada coluna é um dia; quanto mais alta, mais vendeu. Toque numa coluna para ver o valor.</p>
+  <details class="ver-tabela">
+    <summary>Ver em tabela</summary>
+    <table class="tabela">
+      <thead><tr><th>Dia</th><th>Vendas</th><th>Total</th></tr></thead>
+      <tbody>
+      {% for d in grafico.dias if d.total %}
+        <tr><td>{{ d.dia }} ({{ d.semana }})</td><td>{{ d.vendas }}</td><td>{{ d.total|reais }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </details>
+  <script id="dados-grafico-mes" type="application/json">{{ grafico.dias|tojson }}</script>
+  {% else %}
+  <p class="vazio">Nenhuma venda em {{ nome_mes }}.</p>
+  {% endif %}
+</section>
+
+<section class="cartao grafico">
+  <h2>Melhor dia de cada mês · {{ mapa.ano }}</h2>
+  {% if mapa.maximo %}
+  <p class="dica">Cada quadradinho é um dia do mês. <b>Quanto mais forte o laranja, mais vendeu</b> naquele dia.
+    Toque num quadradinho para ver o valor, ou no nome do mês para abrir os relatórios dele.</p>
+  <p class="dica dica-arrastar">↔ Arraste o quadro para o lado para ver o mês inteiro. O melhor dia fica sempre à direita.</p>
+  <div class="mapa-rolagem">
+    <div class="mapa">
+      <span class="mapa-canto"></span>
+      {% for d in range(1, 32) %}<span class="mapa-dia">{{ d if d in (1, 5, 10, 15, 20, 25, 30) else '' }}</span>{% endfor %}
+      <span class="mapa-canto mapa-titulo-melhor">melhor dia</span>
+      {% for m in mapa.meses %}
+        <a class="mapa-mes {{ 'atual' if m.ano_mes == mes }}" href="{{ url_for('relatorios', mes=m.ano_mes) }}">{{ m.nome }}</a>
+        {% for c in m.celulas %}
+          {% if c is none %}<span class="celula inexistente"></span>
+          {% elif c.futuro %}<span class="celula futuro"></span>
+          {% else %}<span class="celula nivel-{{ c.nivel }}" {% if c.total %}tabindex="0"{% endif %}
+                data-dica="{{ c.dia }} de {{ m.nome_longo }} ({{ c.semana }}): {{ c.total|reais if c.total else 'sem vendas' }}{% if c.vendas %} · {{ c.vendas }} venda{{ 's' if c.vendas > 1 }}{% endif %}"></span>
+          {% endif %}
+        {% endfor %}
+        <span class="mapa-melhor">{% if m.melhor %}dia {{ m.melhor.dia }}{% else %}—{% endif %}</span>
+      {% endfor %}
+    </div>
+  </div>
+  <div class="legenda-calor" aria-label="Legenda">
+    <span class="celula nivel-0"></span> sem venda
+    <span class="legenda-separador"></span>
+    menos {% for k in range(1, 6) %}<span class="celula nivel-{{ k }}" title="{{ mapa.faixas[k - 1][0]|reais }} a {{ mapa.faixas[k - 1][1]|reais }}"></span>{% endfor %} mais
+    <span class="nota">(o mais forte = até {{ mapa.maximo|reais }}, o melhor dia do ano)</span>
+  </div>
+  <details class="ver-tabela">
+    <summary>Ver em tabela</summary>
+    <table class="tabela">
+      <thead><tr><th>Mês</th><th>Melhor dia</th><th>Vendeu nesse dia</th><th>Total do mês</th></tr></thead>
+      <tbody>
+      {% for m in mapa.meses if m.total %}
+        <tr><td><a href="{{ url_for('relatorios', mes=m.ano_mes) }}">{{ m.nome_longo }}</a></td>
+            <td>dia {{ m.melhor.dia }} ({{ m.melhor.semana }})</td><td>{{ m.melhor.total|reais }}</td><td>{{ m.total|reais }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </details>
+  {% else %}
+  <p class="vazio">Nenhuma venda em {{ mapa.ano }}.</p>
+  {% endif %}
 </section>
 
 <div class="duas-colunas">
@@ -45,7 +123,7 @@
     <table class="tabela">
       <thead><tr><th>Produto</th><th>Qtd.</th><th>Total</th></tr></thead>
       <tbody>
-      {% for p in produtos %}<tr><td>{{ p.descricao }}</td><td>{{ p.quantidade }}</td><td>{{ p.total|reais }}</td></tr>{% endfor %}
+      {% for p in produtos %}<tr><td>{% if p.produto_id %}<a href="{{ url_for('produto_ver', produto_id=p.produto_id, ano=mes[:4]) }}">{{ p.descricao }}</a>{% else %}{{ p.descricao }} <small>(avulso)</small>{% endif %}</td><td>{{ p.quantidade }}</td><td>{{ p.total|reais }}</td></tr>{% endfor %}
       </tbody>
     </table>
     {% else %}<p class="vazio">Nenhuma venda neste mês.</p>{% endif %}
@@ -60,3 +138,4 @@
   </div>
 </section>
 {% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='graficos.js') }}"></script>{% endblock %}

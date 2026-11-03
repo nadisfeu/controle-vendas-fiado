@@ -12,7 +12,7 @@ Regras que este módulo garante:
 import re
 import sqlite3
 import unicodedata
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 
 SCHEMA = """
@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS clientes (
     observacao         TEXT NOT NULL DEFAULT '',
     saldo_inicial      INTEGER NOT NULL DEFAULT 0,  -- centavos, trazido da planilha antiga
     saldo_inicial_data TEXT,
+    ultimo_pagamento_planilha TEXT,              -- 'AAAA-MM': último mês com pagamento na planilha antiga
     ativo              INTEGER NOT NULL DEFAULT 1,
     criado_em          TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
@@ -33,6 +34,9 @@ CREATE TABLE IF NOT EXISTS produtos (
     nome_busca TEXT NOT NULL UNIQUE,
     preco      INTEGER NOT NULL CHECK (preco >= 0),
     estoque    INTEGER NOT NULL DEFAULT 0,          -- pode ficar negativo: vendeu sem ter (encomenda)
+    codigo     TEXT,                                -- opcional; se preenchido, não repete (sem diferença de maiúscula)
+    marca      TEXT NOT NULL DEFAULT '',            -- opcional; escrita padronizada por formatar_nome
+    tipo       TEXT NOT NULL DEFAULT '',            -- opcional (perfume, hidratante...); idem
     ativo      INTEGER NOT NULL DEFAULT 1,
     criado_em  TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
@@ -94,6 +98,19 @@ def _atualizar_banco_antigo(con):
     if "preco_tabela" not in colunas:
         with con:
             con.execute("ALTER TABLE itens_venda ADD COLUMN preco_tabela INTEGER")
+    colunas = {r["name"] for r in con.execute("PRAGMA table_info(produtos)")}
+    if "codigo" not in colunas:
+        with con:
+            con.execute("ALTER TABLE produtos ADD COLUMN codigo TEXT")
+            con.execute("ALTER TABLE produtos ADD COLUMN marca TEXT NOT NULL DEFAULT ''")
+    if "tipo" not in {r["name"] for r in con.execute("PRAGMA table_info(produtos)")}:
+        with con:
+            con.execute("ALTER TABLE produtos ADD COLUMN tipo TEXT NOT NULL DEFAULT ''")
+    con.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_produtos_codigo ON produtos(upper(codigo)) WHERE codigo IS NOT NULL")
+    colunas = {r["name"] for r in con.execute("PRAGMA table_info(clientes)")}
+    if "ultimo_pagamento_planilha" not in colunas:
+        with con:
+            con.execute("ALTER TABLE clientes ADD COLUMN ultimo_pagamento_planilha TEXT")
 
 
 # ---------------------------------------------------------------- texto e dinheiro
@@ -102,13 +119,13 @@ def limpar_nome(texto):
     return " ".join((texto or "").split())
 
 
-_PALAVRAS_MINUSCULAS = {"de", "da", "do", "das", "dos", "e"}
+_PALAVRAS_MINUSCULAS = {"de", "da", "do", "das", "dos", "e", "em", "no", "na", "nos", "nas", "com"}
 
 
 def formatar_nome(texto):
     """'MARTA  JARDIM' -> 'Marta Jardim'; 'regina filha DE ze' -> 'Regina Filha de Ze'.
 
-    Primeira letra de cada palavra maiúscula, resto minúsculo; 'de/da/do/das/dos/e' ficam minúsculos
+    Primeira letra de cada palavra maiúscula, resto minúsculo; 'de/da/do/das/dos/e/em/no/na/com' ficam minúsculos
     (menos no começo). Só a primeira letra da palavra: 'guarda-chuva' -> 'Guarda-chuva', '(ane' -> '(Ane'.
     """
     palavras = limpar_nome(texto).lower().split(" ")
@@ -240,6 +257,41 @@ def padronizar_nomes_clientes(con):
     return [(antes, depois) for _, antes, depois in mudancas]
 
 
+def clientes_sem_pagar(con, hoje, dias_minimos):
+    """Quem deve e não paga há pelo menos `dias_minimos` dias, do que está há mais tempo para o de menos.
+
+    Último pagamento = o mais recente entre o registrado no sistema e o mês da planilha antiga
+    (contado como o último dia daquele mês, a favor do cliente). Sem nenhum pagamento conhecido,
+    conta desde que a dívida existe no sistema (data do saldo trazido ou primeira compra).
+    """
+    primeira_compra = {r[0]: r[1] for r in con.execute(
+        "SELECT cliente_id, MIN(data) FROM vendas WHERE cancelada_em IS NULL GROUP BY cliente_id")}
+    lista = []
+    for c in saldos(con, apenas_ativos=False):
+        if c["saldo"] <= 0:
+            continue
+        no_sistema = date.fromisoformat(c["ultimo_pagamento"]) if c["ultimo_pagamento"] else None
+        na_planilha = None
+        if c["ultimo_pagamento_planilha"]:
+            ano, mes = int(c["ultimo_pagamento_planilha"][:4]), int(c["ultimo_pagamento_planilha"][5:7])
+            na_planilha = date(ano + (mes == 12), mes % 12 + 1, 1) - timedelta(days=1)
+        if no_sistema or na_planilha:
+            referencia = max(d for d in (no_sistema, na_planilha) if d)
+            origem = "sistema" if referencia == no_sistema else "planilha"
+        else:
+            desde = [d for d in (c["saldo_inicial_data"] if c["saldo_inicial"] > 0 else None,
+                                 primeira_compra.get(c["id"])) if d]
+            referencia = date.fromisoformat(min(desde)) if desde else hoje
+            origem = "nenhum"
+        dias = (hoje - referencia).days
+        if dias >= dias_minimos:
+            lista.append(dict(id=c["id"], nome=c["nome"], ativo=c["ativo"], telefone=c["telefone"], saldo=c["saldo"],
+                              referencia=referencia.isoformat(), origem=origem, dias=dias,
+                              mes_planilha=c["ultimo_pagamento_planilha"]))
+    lista.sort(key=lambda x: (-x["dias"], -x["saldo"]))
+    return lista
+
+
 def saldos(con, apenas_ativos=True):
     where = " WHERE c.ativo = 1" if apenas_ativos else ""
     return con.execute(_SQL_SALDOS + where + " ORDER BY c.nome_busca").fetchall()
@@ -289,26 +341,53 @@ def extrato(con, cliente_id):
 
 # ---------------------------------------------------------------- produtos
 
-def criar_produto(con, nome, preco, estoque=0):
+def _limpar_codigo(con, codigo, ignorar_id=None):
+    """'' -> None (sem código). Código repetido (sem diferença de maiúscula) é erro com o nome de quem já usa."""
+    codigo = "".join((codigo or "").split()) or None
+    if codigo:
+        outro = con.execute("SELECT id, nome FROM produtos WHERE upper(codigo) = upper(?)", (codigo,)).fetchone()
+        if outro and outro["id"] != ignorar_id:
+            raise ErroDeCadastro(f'O código "{codigo}" já é do produto "{outro["nome"]}".')
+    return codigo
+
+
+def criar_produto(con, nome, preco, estoque=0, codigo="", marca="", tipo=""):
     nome = limpar_nome(nome)
     if not nome:
         raise ErroDeCadastro("O nome do produto é obrigatório.")
     _checar_nome_livre(con, "produtos", nome)
+    codigo = _limpar_codigo(con, codigo)
     with con:
-        cur = con.execute("INSERT INTO produtos (nome, nome_busca, preco, estoque) VALUES (?, ?, ?, ?)",
-                          (nome, normalizar(nome), preco, estoque))
+        cur = con.execute("INSERT INTO produtos (nome, nome_busca, preco, estoque, codigo, marca, tipo)"
+                          " VALUES (?, ?, ?, ?, ?, ?, ?)",
+                          (nome, normalizar(nome), preco, estoque, codigo, formatar_nome(marca), formatar_nome(tipo)))
     return cur.lastrowid
 
 
-def atualizar_produto(con, produto_id, nome, preco, ativo, estoque=None):
-    """estoque=None mantém o estoque como está."""
+def atualizar_produto(con, produto_id, nome, preco, ativo, estoque=None, codigo=None, marca=None, tipo=None):
+    """estoque, codigo, marca e tipo = None mantêm o que está; codigo/marca/tipo = '' apagam."""
     nome = limpar_nome(nome)
     if not nome:
         raise ErroDeCadastro("O nome do produto é obrigatório.")
     _checar_nome_livre(con, "produtos", nome, ignorar_id=produto_id)
+    atual = produto(con, produto_id)
+    codigo = atual["codigo"] if codigo is None else _limpar_codigo(con, codigo, ignorar_id=produto_id)
+    marca = atual["marca"] if marca is None else formatar_nome(marca)
+    tipo = atual["tipo"] if tipo is None else formatar_nome(tipo)
     with con:
-        con.execute("UPDATE produtos SET nome=?, nome_busca=?, preco=?, ativo=?, estoque=COALESCE(?, estoque)"
-                    " WHERE id=?", (nome, normalizar(nome), preco, int(ativo), estoque, produto_id))
+        con.execute("UPDATE produtos SET nome=?, nome_busca=?, preco=?, ativo=?, estoque=COALESCE(?, estoque),"
+                    " codigo=?, marca=?, tipo=? WHERE id=?",
+                    (nome, normalizar(nome), preco, int(ativo), estoque, codigo, marca, tipo, produto_id))
+
+
+def marcas(con):
+    """Marcas já usadas (para sugerir no cadastro e filtrar)."""
+    return [r[0] for r in con.execute("SELECT DISTINCT marca FROM produtos WHERE marca <> '' ORDER BY marca")]
+
+
+def tipos(con):
+    """Tipos já usados (perfume, hidratante...), para sugerir e filtrar."""
+    return [r[0] for r in con.execute("SELECT DISTINCT tipo FROM produtos WHERE tipo <> '' ORDER BY tipo")]
 
 
 def adicionar_estoque(con, produto_id, quantidade):
@@ -367,6 +446,8 @@ def registrar_venda(con, cliente_id, data, itens, observacao=""):
 def registrar_pagamento(con, cliente_id, data, valor, forma="", observacao=""):
     cliente(con, cliente_id)
     data = validar_data(data)
+    if not isinstance(valor, int):
+        raise TypeError(f"valor do pagamento deve ser centavos (int), veio {valor!r}")
     if valor <= 0:
         raise ErroDeCadastro("O valor do pagamento precisa ser maior que zero.")
     with con:
@@ -505,12 +586,49 @@ def extrato_mes(con, cliente_id, ano_mes):
     return dict(resumo, linhas=linhas)
 
 
+def vendas_por_dia(con, inicio, fim):
+    """{'AAAA-MM-DD': (total em centavos, número de vendas)} das vendas não canceladas com data em [inicio, fim)."""
+    return {r["data"]: (r["total"], r["vendas"]) for r in con.execute("""
+        SELECT v.data, SUM(i.quantidade * i.preco_unit) AS total, COUNT(DISTINCT v.id) AS vendas
+        FROM vendas v JOIN itens_venda i ON i.venda_id = v.id
+        WHERE v.cancelada_em IS NULL AND v.data >= ? AND v.data < ?
+        GROUP BY v.data""", (inicio, fim))}
+
+
 def vendas_por_produto_mes(con, ano_mes):
+    """Produtos cadastrados agrupados pelo produto (mesmo se mudou de nome); avulsos pela descrição."""
     return con.execute("""
-        SELECT i.descricao, SUM(i.quantidade) AS quantidade, SUM(i.quantidade * i.preco_unit) AS total
-        FROM itens_venda i JOIN vendas v ON v.id = i.venda_id
+        SELECT i.produto_id, COALESCE(p.nome, i.descricao) AS descricao,
+               SUM(i.quantidade) AS quantidade, SUM(i.quantidade * i.preco_unit) AS total
+        FROM itens_venda i JOIN vendas v ON v.id = i.venda_id LEFT JOIN produtos p ON p.id = i.produto_id
         WHERE v.cancelada_em IS NULL AND substr(v.data, 1, 7) = ?
-        GROUP BY i.descricao ORDER BY total DESC""", (ano_mes,)).fetchall()
+        GROUP BY COALESCE('p' || i.produto_id, 'a' || i.descricao) ORDER BY total DESC""", (ano_mes,)).fetchall()
+
+
+def relatorio_produto(con, produto_id, ano):
+    """Vendas de um produto no ano: por mês, quem mais comprou, descontos, e as últimas vendas (de sempre)."""
+    p = produto(con, produto_id)
+    base = """FROM itens_venda i JOIN vendas v ON v.id = i.venda_id JOIN clientes c ON c.id = v.cliente_id
+              WHERE i.produto_id = :p AND v.cancelada_em IS NULL"""
+    no_ano = base + " AND substr(v.data, 1, 4) = :ano"
+    args = {"p": produto_id, "ano": str(ano)}
+    por_mes = {r["mes"]: r for r in con.execute(
+        "SELECT CAST(substr(v.data, 6, 2) AS INTEGER) AS mes, SUM(i.quantidade) AS quantidade,"
+        " SUM(i.quantidade * i.preco_unit) AS total " + no_ano + " GROUP BY mes", args)}
+    meses = [dict(numero=m, nome=MESES[m - 1], quantidade=por_mes[m]["quantidade"] if m in por_mes else 0,
+                  total=por_mes[m]["total"] if m in por_mes else 0) for m in range(1, 13)]
+    clientes = con.execute(
+        "SELECT c.id, c.nome, SUM(i.quantidade) AS quantidade, SUM(i.quantidade * i.preco_unit) AS total "
+        + no_ano + " GROUP BY c.id ORDER BY quantidade DESC, total DESC LIMIT 10", args).fetchall()
+    descontos = con.execute(
+        "SELECT COALESCE(SUM(i.quantidade * (i.preco_tabela - i.preco_unit)), 0) " + no_ano
+        + " AND i.preco_tabela > i.preco_unit", args).fetchone()[0]
+    ultimas = con.execute(
+        "SELECT v.id AS venda_id, v.data, c.id AS cliente_id, c.nome, i.quantidade, i.preco_unit, i.preco_tabela "
+        + base + " ORDER BY v.data DESC, v.id DESC LIMIT 15", args).fetchall()
+    return dict(produto=p, ano=ano, meses=meses, clientes=clientes, ultimas=ultimas, descontos=descontos,
+                quantidade=sum(m["quantidade"] for m in meses), total=sum(m["total"] for m in meses),
+                maior_mes=max(m["total"] for m in meses))
 
 
 def ultimos_lancamentos(con, limite=10):

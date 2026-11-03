@@ -31,6 +31,15 @@
   </div>
 </section>
 
+{% if atrasados %}
+<a class="cartao alerta-atraso" href="{{ url_for('clientes_sem_pagar', dias=dias_atraso) }}">
+  <span class="alerta-icone" aria-hidden="true">⏰</span>
+  <span><b>{{ atrasados|length }} cliente{{ 's' if atrasados|length > 1 }} sem pagar há mais de {{ dias_atraso }} dias</b>
+    <small>devem {{ atrasados_total|reais }} no total · toque para ver a lista</small></span>
+  <span class="alerta-seta" aria-hidden="true">→</span>
+</a>
+{% endif %}
+
 <div class="duas-colunas">
   <section class="cartao">
     <h2>Quem mais deve</h2>

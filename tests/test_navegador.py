@@ -221,7 +221,8 @@ def test_estoque_aparece_e_avisa_na_venda(pagina, site):
 
     pg.goto(url + "/produtos")
     assert "faltam 1" in pg.inner_text(".lista li:has-text('Kit Presente')")
-    pg.click("text=Kit Presente")
+    pg.click("text=Kit Presente")                       # abre o relatório do produto
+    pg.click("text=Editar produto / estoque")
     pg.fill("input[name=entrada]", "5")
     pg.click("button[type=submit]")
     assert "Estoque de Kit Presente: 4" in pg.inner_text(".aviso")
@@ -345,3 +346,113 @@ def test_botao_de_tema(navegador, site, tema_do_aparelho):
     assert pg.locator("#botao-tema").inner_text() == "🌓 Automático"
     assert fundo() == (CLARO if tema_do_aparelho == "light" else ESCURO)
     ctx.close()
+
+
+def test_graficos_de_relatorios(pagina, site):
+    url, banco = site
+    con = db.conectar(banco)
+    c = db.criar_cliente(con, "Beatriz Gráfico")
+    for data, valor in [("2026-11-01", 15000), ("2026-11-02", 52000), ("2026-03-05", 8000)]:
+        db.registrar_venda(con, c, data, [dict(produto_id=None, descricao="x", quantidade=1, preco_unit=valor)])
+    con.close()
+    pg = pagina
+    pg.goto(url + "/relatorios?mes=2026-11")
+    dias = pg.evaluate("JSON.parse(document.getElementById('dados-grafico-mes').textContent)")
+    com_venda = [d for d in dias if d["total"] > 0]
+    assert pg.locator("#grafico-mes path.barra").count() == len(com_venda)
+    assert pg.locator("#grafico-mes .rotulo-valor").count() == 1               # só o maior ganha número
+    sem_rolagem_lateral(pg)
+    foto(pg, "12_relatorios_graficos")
+
+    # mouse sobre a coluna do dia 2 mostra o valor
+    melhor = max(com_venda, key=lambda d: d["total"])
+    coluna = pg.locator("#grafico-mes g.dia").nth(melhor["dia"] - 1)
+    coluna.hover()
+    assert pg.locator(".dica-grafico").is_visible()
+    assert pg.inner_text(".dica-grafico").startswith(f"Dia {melhor['dia']} (")
+
+    # toque num quadradinho do mapa (março, dia 5) mostra o valor e continua aparecendo
+    celula = pg.locator(".mapa .celula[data-dica^='5 de março']")
+    celula.scroll_into_view_if_needed()
+    celula.dispatch_event("pointerover", {"pointerType": "touch"})
+    celula.dispatch_event("pointerout", {"pointerType": "touch"})
+    assert pg.inner_text(".dica-grafico") == "5 de março (qui): R$ 80,00 · 1 venda"
+    pg.locator("h1").click()                                                   # tocar fora esconde
+    assert not pg.locator(".dica-grafico").is_visible()
+    # o nome do mês leva aos relatórios daquele mês
+    pg.click(".mapa-mes:has-text('mar')")
+    assert "mes=2026-03" in pg.url and "Vendas por dia · março de 2026" in pg.inner_text("main")
+
+
+def test_telas_novas_no_celular(pagina, site):
+    url, banco = site
+    con = db.conectar(banco)
+    c = db.criar_cliente(con, "Marisa Atrasada", telefone="(31) 98888-7777", saldo_inicial=31000, saldo_inicial_data="2025-05-01")
+    db.atualizar_cliente(con, c, "Marisa Atrasada", "(31) 98888-7777", "", 31000, False)
+    con.close()
+    pg = pagina
+    pg.goto(url + "/clientes")
+    pg.select_option("#mostrar", "desativados")
+    pg.wait_for_url("**mostrar=desativados**")
+    assert "Marisa Atrasada" in pg.inner_text("#lista") and "desativados" in pg.inner_text(".aviso-info")
+    sem_rolagem_lateral(pg)
+
+    pg.goto(url + "/")
+    pg.click(".alerta-atraso")
+    assert "/clientes/sem-pagar" in pg.url
+    linha = pg.locator(".lista-atraso li:has-text('Marisa Atrasada')")
+    assert "nenhum pagamento registrado" in linha.inner_text() and "(desativado)" in linha.inner_text()
+    assert linha.locator("a[href^='tel:']").count() == 1
+    pg.select_option("select[name=dias]", "180")
+    pg.wait_for_url("**dias=180**")
+    sem_rolagem_lateral(pg)
+    foto(pg, "13_sem_pagar")
+
+    pg.goto(url + "/produtos")
+    pg.click(".lista a:has-text('Perfume Importado')")
+    assert "Vendas por mês em" in pg.inner_text("main")
+    assert pg.locator(".barras-barra").count() >= 1
+    sem_rolagem_lateral(pg)
+    foto(pg, "14_produto")
+
+
+def test_filtros_de_produto_e_busca_por_codigo(pagina, site):
+    url, banco = site
+    con = db.conectar(banco)
+    db.criar_produto(con, "Essencial Clássico", 25000, estoque=4, codigo="73455", marca="Natura", tipo="Perfume")
+    db.criar_produto(con, "Malbec", 19000, estoque=0, codigo="88001", marca="O Boticário", tipo="Perfume")
+    db.criar_produto(con, "Tododia Ameixa", 5500, estoque=9, marca="Natura", tipo="Hidratante")
+    parado = db.criar_produto(con, "Linha Antiga", 1000, tipo="Hidratante")
+    db.atualizar_produto(con, parado, "Linha Antiga", 1000, False)
+    con.close()
+    pg = pagina
+    pg.goto(url + "/produtos")
+    visiveis = lambda: pg.locator("#lista li:not([hidden]) .produto-nome a").all_inner_texts()
+    pg.fill("#filtro", "73455")
+    assert visiveis() == ["Essencial Clássico"]                                  # pelo código
+    pg.fill("#filtro", "boticario")
+    assert visiveis() == ["Malbec"]                                              # pela marca, sem acento
+    pg.fill("#filtro", "")
+    pg.select_option("#filtro-tipo", "perfume")
+    pg.select_option("#filtro-marca", "natura")
+    assert visiveis() == ["Essencial Clássico"]                                  # tipo + marca juntos
+    pg.select_option("#filtro-tipo", "")
+    pg.select_option("#filtro-marca", "")
+    pg.select_option("#filtro-estoque", "sem")
+    assert "Malbec" in visiveis() and "Tododia Ameixa" not in visiveis()
+    pg.select_option("#filtro-estoque", "")
+    assert "Linha Antiga" not in visiveis()
+    pg.select_option("#filtro-situacao", "desativados")
+    assert visiveis() == ["Linha Antiga"]
+    sem_rolagem_lateral(pg)
+
+    abrir_cliente(pg, url, "Neusa")
+    pg.click("text=Nova venda")
+    pg.fill("#busca-produto", "88001")
+    assert pg.locator("button.produto").all_inner_texts()[0].startswith("Malbec")
+    assert pg.locator("button.produto").count() == 1
+    pg.fill("#busca-produto", "")
+    pg.select_option("#filtro-tipo", "Hidratante")
+    nomes = [t.split("\n")[0] for t in pg.locator("button.produto").all_inner_texts()]
+    assert nomes == ["Tododia Ameixa"]                                           # desativado não aparece na venda
+    assert "Hidratante · Natura" in pg.locator("button.produto").first.inner_text()

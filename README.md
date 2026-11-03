@@ -24,7 +24,11 @@ mês novo, e muito trabalho manual.
 ## O que o sistema faz
 
 - **Clientes** com busca que ignora acento e maiúscula, e que não deixa cadastrar o mesmo nome duas vezes.
-- **Produtos** com preço e estoque — a venda desconta do estoque, cancelar devolve.
+  Cliente desativado some da lista (há um filtro para ver só os desativados), mas a dívida dele continua contando.
+- **Quem está há muito tempo sem pagar**: lista de quem deve e não paga há mais de 30/60/90/180 dias, com o
+  telefone para ligar — usando também o histórico de pagamentos da planilha antiga, mês a mês desde 2023.
+- **Produtos** com preço, estoque e, opcionalmente, **tipo, marca e código** — busca por qualquer um deles e
+  filtros por tipo, marca, estoque e situação. A venda desconta do estoque, cancelar devolve.
 - **Nova venda** na tela do cliente: toca nos produtos, ajusta a quantidade, dá **desconto** no item
   ("o perfume é 200, saiu por 170") e vê o saldo depois da venda antes de salvar.
 - **Pagamentos** com o botão "pagou tudo"; quem paga a mais fica com crédito.
@@ -32,6 +36,9 @@ mês novo, e muito trabalho manual.
   (fica riscado), nunca apagado.
 - **Relatórios do mês** e **folhas para imprimir** (ou salvar em PDF e mandar pelo WhatsApp): resumo
   geral com saldo anterior → comprou → pagou → saldo no fim, e extrato de cada cliente.
+- **Gráficos**: vendas por dia do mês (colunas) e o **melhor dia de cada mês** no ano (mapa de calor dia × mês),
+  para ver de relance "em outubro, o dia que mais vendeu foi o 20".
+- **Relatório por produto**: quanto vendeu mês a mês, quem mais comprou, descontos e últimas vendas.
 - **Exportação para Excel** e backup do banco num clique.
 - **Importação** dos clientes e saldos da planilha antiga, conferindo se a soma bate.
 - Toda tela tem um quadro **"Como usar"** explicando o que fazer.
@@ -39,6 +46,12 @@ mês novo, e muito trabalho manual.
 
 <p align="center">
   <img src="docs/inicio.png" width="640" alt="Tela inicial no computador: total a receber, quem mais deve e últimos lançamentos">
+</p>
+<p align="center">
+  <img src="docs/graficos.png" width="640" alt="Gráficos: vendas por dia do mês e mapa de calor com o melhor dia de cada mês">
+</p>
+<p align="center">
+  <img src="docs/produtos_filtros.png" width="640" alt="Lista de produtos com tipo, marca e código, e filtros">
 </p>
 <p align="center">
   <img src="docs/resumo_mes_impresso.png" width="480" alt="Resumo do mês pronto para imprimir">
@@ -54,10 +67,12 @@ mês novo, e muito trabalho manual.
 - **Falhar alto**: o importador recusa planilha com fórmula sem valor calculado em vez de importar
   zero calado; o extrato confere se o saldo fecha antes de mostrar.
 - **Celular primeiro**: botões grandes, nada mais largo que a tela (há teste para isso).
+- **Gráficos com cor conferida**: a escala do mapa de calor foi validada (um só tom, degraus visíveis, contraste
+  com o fundo) no tema claro e no escuro; todo gráfico tem um resumo em texto e uma tabela com os mesmos números.
 
 ## Testes
 
-92 testes: regras de saldo, dinheiro, estoque, desconto, importação, impressão — e testes num
+119 testes: regras de saldo, dinheiro, estoque, desconto, importação, impressão, gráficos, filtros — e testes num
 navegador de verdade (Chromium via Playwright) que clicam pelas telas em tamanho de celular,
 conferem que não há erro de JavaScript e que nenhuma tela passa da largura do celular.
 As cores têm contraste conferido (4,5:1 ou mais) nos dois temas.
@@ -90,9 +105,11 @@ Para os testes de navegador: `pip install playwright && python -m playwright ins
 | `app.py` | site (Flask): rotas e login |
 | `db.py` | banco SQLite, regras de saldo, estoque, desconto e relatórios |
 | `exportar.py` | planilha Excel com tudo |
+| `graficos.py` | números dos gráficos (vendas por dia e mapa do ano) |
 | `importar_planilha.py` | importa clientes e saldo de uma aba da planilha antiga |
+| `importar_ultimos_pagamentos.py` | lê na planilha antiga o último mês em que cada cliente pagou |
 | `relatorio_saldos_sumidos.py` | lista saldos que sumiram de um mês para o outro na planilha antiga |
-| `demo.py` | banco de demonstração com dados fictícios |
+| `demo.py` | banco de demonstração com um ano de vendas fictícias |
 | `templates/`, `static/` | telas (HTML, CSS e um pouco de JavaScript, sem framework) |
 | `tests/` | `test_sistema.py` (regras e site) e `test_navegador.py` (cliques no navegador) |
 

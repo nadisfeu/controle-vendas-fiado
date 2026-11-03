@@ -20,7 +20,13 @@
   <section class="cartao">
     <h2>Produtos</h2>
     {% if produtos %}
-    <input type="search" id="busca-produto" placeholder="Buscar produto…" aria-label="Buscar produto">
+    <div class="filtros filtros-venda">
+      <input type="search" id="busca-produto" placeholder="Buscar por nome, código, tipo ou marca…" aria-label="Buscar produto">
+      {% if tipos %}<select id="filtro-tipo" aria-label="Filtrar por tipo"><option value="">Tipo: todos</option>
+        {% for x in tipos %}<option>{{ x }}</option>{% endfor %}</select>{% endif %}
+      {% if marcas %}<select id="filtro-marca" aria-label="Filtrar por marca"><option value="">Marca: todas</option>
+        {% for m in marcas %}<option>{{ m }}</option>{% endfor %}</select>{% endif %}
+    </div>
     <ul class="grade-produtos" id="produtos"></ul>
     {% else %}
     <p class="vazio">Nenhum produto cadastrado ainda. <a href="{{ url_for('produtos') }}">Cadastrar produtos</a>

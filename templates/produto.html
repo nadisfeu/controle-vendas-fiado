@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block titulo %}{{ p.nome }}{% endblock %}
+{% block conteudo %}
+<a class="voltar" href="{{ url_for('produtos') }}">← Produtos</a>
+<div class="cabecalho-pagina">
+  <div>
+    <h1>{{ p.nome }}{% if not p.ativo %} <small>(desativado)</small>{% endif %}</h1>
+    {% set extra = [p.tipo, p.marca, ('cód. ' ~ p.codigo) if p.codigo else ''] | select | join(' · ') %}
+    {% if extra %}<p class="sub">{{ extra }}</p>{% endif %}
+  </div>
+  <a class="botao" href="{{ url_for('produto_editar', produto_id=p.id) }}">Editar produto / estoque</a>
+</div>
+
+<section class="indicadores pequenos">
+  <div class="indicador"><span class="rotulo">Preço normal</span><span class="valor">{{ p.preco|reais }}</span></div>
+  <div class="indicador"><span class="rotulo">Em estoque</span>
+    <span class="valor {{ 'devendo' if p.estoque <= 0 }}">{{ p.estoque if p.estoque >= 0 else 'faltam ' ~ (-p.estoque) }}</span></div>
+  <div class="indicador"><span class="rotulo">Vendidos em {{ ano }}</span><span class="valor">{{ r.quantidade }}</span></div>
+  <div class="indicador"><span class="rotulo">Total em {{ ano }}</span><span class="valor">{{ r.total|reais }}</span></div>
+  <div class="indicador"><span class="rotulo">Descontos em {{ ano }}</span><span class="valor">{{ r.descontos|reais }}</span></div>
+</section>
+
+<nav class="troca-ano" aria-label="Ano">
+  <a href="{{ url_for('produto_ver', produto_id=p.id, ano=ano - 1) }}">← {{ ano - 1 }}</a>
+  <b>{{ ano }}</b>
+  <a href="{{ url_for('produto_ver', produto_id=p.id, ano=ano + 1) }}">{{ ano + 1 }} →</a>
+</nav>
+
+<section class="cartao">
+  <h2>Vendas por mês em {{ ano }}</h2>
+  {% if r.total %}
+  <p class="dica">A barra mostra o valor vendido no mês; quanto maior, mais vendeu.</p>
+  <ul class="barras-mes">
+    {% for m in r.meses %}
+    <li>
+      <span class="barras-rotulo">{{ m.nome[:3] }}</span>
+      <span class="barras-trilho">{% if m.total %}<span class="barras-barra" style="width: {{ (100 * m.total / r.maior_mes)|round(1) }}%"></span>{% endif %}</span>
+      <span class="barras-valor">{% if m.total %}{{ m.quantidade }} un. · {{ m.total|reais }}{% else %}—{% endif %}</span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="vazio">Nenhuma venda deste produto em {{ ano }}.</p>
+  {% endif %}
+</section>
+
+<div class="duas-colunas">
+  <section class="cartao">
+    <h2>Quem mais comprou em {{ ano }}</h2>
+    {% if r.clientes %}
+    <table class="tabela">
+      <thead><tr><th>Cliente</th><th>Qtd.</th><th>Total</th></tr></thead>
+      <tbody>
+      {% for c in r.clientes %}
+        <tr><td><a href="{{ url_for('cliente_ver', cliente_id=c.id) }}">{{ c.nome }}</a></td><td>{{ c.quantidade }}</td><td>{{ c.total|reais }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<p class="vazio">Ninguém comprou em {{ ano }}.</p>{% endif %}
+  </section>
+  <section class="cartao">
+    <h2>Últimas vendas</h2>
+    {% if r.ultimas %}
+    <ul class="lista">
+      {% for v in r.ultimas %}
+      <li><span><a href="{{ url_for('cliente_ver', cliente_id=v.cliente_id) }}">{{ v.nome }}</a>
+          <small>{{ v.data|data_br }} · {{ v.quantidade }}× {{ v.preco_unit|reais }}{% if v.preco_tabela is not none and v.preco_tabela > v.preco_unit %} (de {{ v.preco_tabela|reais }}){% endif %}</small></span>
+          <span>{{ (v.quantidade * v.preco_unit)|reais }}</span></li>
+      {% endfor %}
+    </ul>
+    {% else %}<p class="vazio">Este produto ainda não foi vendido.</p>{% endif %}
+  </section>
+</div>
+{% endblock %}

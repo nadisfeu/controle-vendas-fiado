@@ -5,11 +5,13 @@
   <h1>Clientes</h1>
   <a class="botao botao-principal" href="{{ url_for('cliente_novo') }}">+ Novo cliente</a>
 </div>
+<p><a href="{{ url_for('clientes_sem_pagar') }}">⏰ Ver quem está há muito tempo sem pagar →</a></p>
 
 <details class="ajuda">
   <summary>Como usar</summary>
   <p>Digite parte do nome para filtrar (não precisa de acento nem maiúscula). Toque no cliente para
   ver o histórico e lançar <b>venda</b> ou <b>pagamento</b>.</p>
+  <p>Em <b>Mostrar</b> dá para ver só os clientes <b>desativados</b> (ou todos).</p>
   <p>Em <b>Ordem</b> dá para ver primeiro quem deve mais (maior saldo) ou quem deve menos / tem crédito (menor saldo).</p>
   <p>Cores do saldo: <span class="devendo">vermelho = está devendo</span>,
   <span class="credito">verde = tem crédito</span> (pagou a mais), cinza = zerado.</p>
@@ -24,14 +26,25 @@
     <option value="saldo" {{ 'selected' if request.args.get('ordem') == 'saldo' }}>Ordem: maior saldo</option>
     <option value="menor" {{ 'selected' if request.args.get('ordem') == 'menor' }}>Ordem: menor saldo</option>
   </select>
+  <form method="get" class="form-mostrar">
+    <select name="mostrar" id="mostrar" aria-label="Quais clientes mostrar" onchange="this.form.submit()">
+      <option value="ativos" {{ 'selected' if mostrar == 'ativos' }}>Mostrar: ativos</option>
+      <option value="desativados" {{ 'selected' if mostrar == 'desativados' }}>Mostrar: só desativados</option>
+      <option value="todos" {{ 'selected' if mostrar == 'todos' }}>Mostrar: todos</option>
+    </select>
+  </form>
 </div>
+{% if mostrar == 'desativados' %}
+<p class="aviso aviso-info">Mostrando só os clientes <b>desativados</b>. Para reativar um, abra o cliente →
+  <b>Editar cadastro</b> → marque "Cliente ativo".</p>
+{% endif %}
 <p class="contagem" id="contagem"></p>
 
 <ul class="lista lista-clientes" id="lista">
   {% for c in clientes %}
   <li data-busca="{{ c.nome_busca }}" data-saldo="{{ c.saldo }}">
     <a href="{{ url_for('cliente_ver', cliente_id=c.id) }}">
-      <span class="nome">{{ c.nome }}{% if not c.ativo %} <small>(inativo)</small>{% endif %}</span>
+      <span class="nome">{{ c.nome }}{% if not c.ativo %} <small>(desativado)</small>{% endif %}</span>
       <span class="saldo {{ 'devendo' if c.saldo > 0 else ('credito' if c.saldo < 0 else 'zerado') }}">
         {% if c.saldo < 0 %}crédito {{ (-c.saldo)|reais }}{% else %}{{ c.saldo|reais }}{% endif %}
       </span>
@@ -39,11 +52,9 @@
   </li>
   {% endfor %}
 </ul>
-<p class="vazio" id="nada" hidden>Nenhum cliente encontrado. <a href="{{ url_for('cliente_novo') }}">Cadastrar novo?</a></p>
-
-<p class="rodape-lista">
-  {% if mostrar_inativos %}<a href="{{ url_for('clientes') }}">Esconder clientes inativos</a>
-  {% else %}<a href="{{ url_for('clientes', inativos=1) }}">Mostrar também clientes inativos</a>{% endif %}
+<p class="vazio" id="nada" hidden>
+  {% if mostrar == 'desativados' and not clientes %}Nenhum cliente desativado.
+  {% else %}Nenhum cliente encontrado. <a href="{{ url_for('cliente_novo') }}">Cadastrar novo?</a>{% endif %}
 </p>
 {% endblock %}
 {% block scripts %}

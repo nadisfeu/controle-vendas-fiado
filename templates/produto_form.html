@@ -1,10 +1,18 @@
 {% extends "base.html" %}
 {% block titulo %}Editar {{ p.nome }}{% endblock %}
 {% block conteudo %}
-<a class="voltar" href="{{ url_for('produtos') }}">← Produtos</a>
+<a class="voltar" href="{{ url_for('produto_ver', produto_id=p.id) }}">← {{ p.nome }}</a>
 <h1>Editar produto</h1>
 <form method="post" class="cartao formulario">
+  <label><span>Tipo <small>(opcional, ex.: Perfume)</small></span>
+    <input name="tipo" list="lista-tipos" autocomplete="off" value="{{ form.get('tipo', p.tipo) }}"></label>
+  <label><span>Marca <small>(opcional, ex.: Natura)</small></span>
+    <input name="marca" list="lista-marcas" autocomplete="off" value="{{ form.get('marca', p.marca) }}"></label>
   <label>Nome <input name="nome" required value="{{ form.get('nome', p.nome) }}"></label>
+  <label><span>Código <small>(opcional; não pode repetir)</small></span>
+    <input name="codigo" autocomplete="off" value="{{ form.get('codigo', p.codigo or '') }}"></label>
+  <datalist id="lista-marcas">{% for m in marcas %}<option value="{{ m }}">{% endfor %}</datalist>
+  <datalist id="lista-tipos">{% for x in tipos %}<option value="{{ x }}">{% endfor %}</datalist>
   <label>Preço <input name="preco" inputmode="decimal" required value="{{ form.get('preco', p.preco|campo) }}">
     <small>O novo preço vale só para as próximas vendas.</small></label>
   <label><span>Chegou mercadoria? Quantas unidades somar</span>

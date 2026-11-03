@@ -58,10 +58,10 @@ def gerar_planilha(con):
                                " ORDER BY p.data, p.id")],
          colunas_reais=[3])
 
-    _aba(wb, "Produtos", ["Produto", "Preço atual", "Estoque", "Ativo"],
-         [[p["nome"], r(p["preco"]), p["estoque"], "sim" if p["ativo"] else "não"]
+    _aba(wb, "Produtos", ["Produto", "Tipo", "Marca", "Código", "Preço atual", "Estoque", "Ativo"],
+         [[p["nome"], p["tipo"], p["marca"], p["codigo"] or "", r(p["preco"]), p["estoque"], "sim" if p["ativo"] else "não"]
           for p in db.produtos(con, apenas_ativos=False)],
-         colunas_reais=[2])
+         colunas_reais=[5])
 
     saida = io.BytesIO()
     wb.save(saida)

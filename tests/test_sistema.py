@@ -386,7 +386,7 @@ def test_paginas_de_impressao(cliente_http):
     ("MARTA JARDIM", "Marta Jardim"), ("heloisa campos", "Heloisa Campos"), ("  OTÁVIO   ribeira ", "Otávio Ribeira"),
     ("regina filha DE ze", "Regina Filha de Ze"), ("NEUSA FEIRA DO BAIRRO", "Neusa Feira do Bairro"),
     ("TERESA GUARDA-CHUVA", "Teresa Guarda-chuva"), ("lia (tia lia)", "Lia (Tia Lia)"), ("De souza", "De Souza"),
-    ("ana e maria", "Ana e Maria"), ("SALA 2", "Sala 2"), ("Élida", "Élida"),
+    ("ana e maria", "Ana e Maria"), ("FEITO EM CASA", "Feito em Casa"), ("Zé NA roça", "Zé na Roça"), ("SALA 2", "Sala 2"), ("Élida", "Élida"),
 ])
 def test_formatar_nome(antes, depois):
     assert db.formatar_nome(antes) == depois
@@ -466,3 +466,277 @@ def test_desconto_aparece_na_tela_impressao_e_excel(cliente_http, tmp_path):
     arq.write_bytes(http.get("/exportar.xlsx").data)
     ws = openpyxl.load_workbook(arq)["Vendas"]
     assert [c.value for c in ws[2]][5:9] == [200, 170, 30, 170]
+
+
+# ---------------------------------------------------------------- gráficos
+
+import graficos  # noqa: E402
+from datetime import date  # noqa: E402
+
+
+def _venda(con, cliente, data, valor):
+    return db.registrar_venda(con, cliente, data, [dict(produto_id=None, descricao="x", quantidade=1, preco_unit=valor)])
+
+
+def test_grafico_mes_melhor_pior_e_futuro(con):
+    c = db.criar_cliente(con, "Vera")
+    _venda(con, c, "2026-11-02", 1000)
+    _venda(con, c, "2026-11-02", 500)          # duas vendas no mesmo dia somam
+    _venda(con, c, "2026-11-03", 9000)
+    db.cancelar_venda(con, _venda(con, c, "2026-11-01", 99999))   # cancelada não conta
+    _venda(con, c, "2026-10-31", 77777)        # outro mês não conta
+    g = graficos.grafico_mes(con, "2026-11", hoje=date(2026, 11, 3))
+    assert len(g["dias"]) == 30
+    assert g["dias"][1] == dict(dia=2, semana="seg", total=1500, vendas=2, futuro=False)
+    assert (g["melhor"]["dia"], g["melhor"]["total"]) == (3, 9000)
+    assert (g["pior"]["dia"], g["pior"]["total"]) == (2, 1500)
+    assert g["sem_venda"] == 1                 # só o dia 1; do dia 4 em diante é futuro, não "sem venda"
+    assert g["dias"][3]["futuro"] and not g["dias"][2]["futuro"]
+
+
+def test_grafico_mes_vazio_e_um_dia_so(con):
+    assert graficos.grafico_mes(con, "2026-02", hoje=date(2026, 11, 3))["melhor"] is None
+    c = db.criar_cliente(con, "Wanda")
+    _venda(con, c, "2026-02-14", 100)
+    g = graficos.grafico_mes(con, "2026-02", hoje=date(2026, 11, 3))
+    assert len(g["dias"]) == 28 and g["melhor"]["dia"] == 14 and g["pior"] is None   # um dia só: sem "pior"
+
+
+@pytest.mark.parametrize("total, esperado", [(0, 0), (1, 1), (2000, 1), (2001, 2), (9999, 5), (10000, 5)])
+def test_nivel_do_mapa(total, esperado):
+    assert graficos.nivel(total, 10000) == esperado
+
+
+def test_mapa_ano_melhor_dia_de_cada_mes(con):
+    c = db.criar_cliente(con, "Yara")
+    _venda(con, c, "2026-12-12", 50000)        # "em dezembro vendeu mais no dia 12"
+    _venda(con, c, "2026-12-03", 1000)
+    _venda(con, c, "2026-02-28", 3000)
+    _venda(con, c, "2027-01-01", 99999)        # outro ano não conta
+    m = graficos.mapa_ano(con, 2026, hoje=date(2026, 12, 31))
+    dez, fev = m["meses"][11], m["meses"][1]
+    assert (dez["melhor"]["dia"], dez["total"]) == (12, 51000)
+    assert dez["celulas"][11]["nivel"] == 5 and dez["celulas"][2]["nivel"] == 1 and dez["celulas"][0]["nivel"] == 0
+    assert fev["celulas"][28:] == [None, None, None]      # 29, 30 e 31 de fevereiro não existem
+    assert m["meses"][0]["melhor"] is None and m["maximo"] == 50000
+    # as faixas da legenda batem com a regra de nível
+    for k, (de, ate) in enumerate(m["faixas"], start=1):
+        assert graficos.nivel(de, m["maximo"]) == k and graficos.nivel(ate, m["maximo"]) == k
+    assert m["faixas"][-1][1] == m["maximo"]
+
+
+def test_pagamento_recusa_valor_que_nao_e_centavos(con):
+    c = db.criar_cliente(con, "Zilda")
+    with pytest.raises(TypeError):
+        db.registrar_pagamento(con, c, "2026-11-01", 12.5)
+
+
+def test_relatorios_mostra_graficos(cliente_http):
+    http, banco = cliente_http
+    http.post("/entrar", data={"senha": "segredo"})
+    con = db.conectar(banco)
+    c = db.criar_cliente(con, "Alice")
+    _venda(con, c, "2026-11-02", 45000)
+    con.close()
+    pagina = http.get("/relatorios?mes=2026-11").get_data(as_text=True)
+    assert "Dia que mais vendeu: <b>dia 2 (seg), R$ 450,00</b>" in pagina
+    assert 'id="dados-grafico-mes"' in pagina and "Melhor dia de cada mês · 2026" in pagina
+    assert 'data-dica="2 de novembro (seg): R$ 450,00 · 1 venda"' in pagina
+    vazio = http.get("/relatorios?mes=2025-03").get_data(as_text=True)
+    assert "Nenhuma venda em março de 2025" in vazio and "Nenhuma venda em 2025" in vazio
+
+
+# ---------------------------------------------------------------- sem pagar, desativados, relatório do produto
+
+def test_clientes_sem_pagar(con):
+    hoje = date(2026, 11, 3)
+    pagou_no_sistema = db.criar_cliente(con, "Ana Sistema", saldo_inicial=5000, saldo_inicial_data="2026-01-01")
+    db.registrar_pagamento(con, pagou_no_sistema, "2026-08-01", 1000)          # 94 dias
+    so_planilha = db.criar_cliente(con, "Bia Planilha", saldo_inicial=3000, saldo_inicial_data="2026-11-01")
+    with con:
+        con.execute("UPDATE clientes SET ultimo_pagamento_planilha = '2026-07' WHERE id = ?", (so_planilha,))  # 31/07: 95 dias
+    nunca = db.criar_cliente(con, "Cris Nunca", saldo_inicial=2000, saldo_inicial_data="2026-11-01")             # 2 dias
+    planilha_e_sistema = db.criar_cliente(con, "Dani Ambos", saldo_inicial=9000, saldo_inicial_data="2026-01-01")
+    with con:
+        con.execute("UPDATE clientes SET ultimo_pagamento_planilha = '2025-12' WHERE id = ?", (planilha_e_sistema,))
+    db.registrar_pagamento(con, planilha_e_sistema, "2026-10-20", 100)         # o mais recente vale: 14 dias
+    credito = db.criar_cliente(con, "Eva Credito", saldo_inicial=-500, saldo_inicial_data="2025-01-01")
+    desativada = db.criar_cliente(con, "Fia Desativada", saldo_inicial=700, saldo_inicial_data="2025-11-03")
+    db.atualizar_cliente(con, desativada, "Fia Desativada", "", "", 700, False)
+
+    lista = db.clientes_sem_pagar(con, hoje, 60)
+    assert [(c["nome"], c["dias"], c["origem"]) for c in lista] == [
+        ("Fia Desativada", 365, "nenhum"), ("Bia Planilha", 95, "planilha"), ("Ana Sistema", 94, "sistema")]
+    assert not lista[0]["ativo"]                                              # desativado continua sendo cobrado
+    nomes_0 = {c["nome"] for c in db.clientes_sem_pagar(con, hoje, 0)}
+    assert "Eva Credito" not in nomes_0 and {"Cris Nunca", "Dani Ambos"} <= nomes_0   # crédito não é dívida
+
+
+def _planilha_historico(tmp_path):
+    wb = openpyxl.Workbook()
+    antiga = wb.active
+    antiga.title = "MARÇO"                                   # formato antigo: ano em A1, PAGO na coluna G
+    antiga["A1"] = "Planilha  MARÇO 2023  "
+    for col, rot in zip("ACEGI", ["CLIENTE ", "COMPRADO", " A RECEBER ", "PAGO", "RESTANTE"]):
+        antiga[f"{col}2"] = rot
+    antiga.append(["ANA SILVA", None, 100, None, None, None, 50])
+    antiga.append(["Bia Souza", None, 80, None, None, None, None])
+    nova = wb.create_sheet("OUTUBRO25")                      # formato novo: PAGO na coluna D, cabeçalho na linha 3
+    for col, rot in zip("ABCDE", ["CLIENTE", "COMPRADO", "A RECEBER", "PAGO", "RESTANTE"]):
+        nova[f"{col}3"] = rot
+    nova.append(["ana  silva", 0, 50, 0, 50])                # não pagou em out/25
+    nova.append(["BIA SOUZA", 0, 80, 30, 50])
+    wb.create_sheet("Página9")                                # vazia: ignorada
+    arq = tmp_path / "hist.xlsx"
+    wb.save(arq)
+    return arq
+
+
+def test_ler_ultimos_pagamentos_dos_dois_formatos(tmp_path):
+    import importar_ultimos_pagamentos as iup
+    ultimo, ignoradas = iup.ultimos_pagamentos(_planilha_historico(tmp_path))
+    assert ultimo == {"ana silva": "2023-03", "bia souza": "2025-10"} and ignoradas == ["Página9"]
+    assert iup.mes_da_aba("NOVEMBRO2026", None) == (2026, 11) and iup.mes_da_aba("SETEMBRO25.2", None) == (2025, 9)
+    assert iup.mes_da_aba("MARCO26", None) == (2026, 3) and iup.mes_da_aba("FEVEREIRO24", None) == (2024, 2)
+
+
+def test_ler_ultimos_pagamentos_falha_alto(tmp_path):
+    import importar_ultimos_pagamentos as iup
+    wb = openpyxl.Workbook()
+    wb.active.title = "RESUMO"
+    wb.active["A1"] = "qualquer coisa"
+    arq = tmp_path / "ruim.xlsx"
+    wb.save(arq)
+    with pytest.raises(SystemExit, match="não sei de que mês"):
+        iup.ultimos_pagamentos(arq)
+    wb.active.title = "ABRIL"                                  # mês sem ano em lugar nenhum
+    wb.save(arq)
+    with pytest.raises(SystemExit, match="não diz o ano"):
+        iup.ultimos_pagamentos(arq)
+
+
+def test_relatorio_produto(con):
+    a, b = db.criar_cliente(con, "Gil"), db.criar_cliente(con, "Hugo")
+    p = db.criar_produto(con, "Perfume", 20000, estoque=10)
+    item = lambda q, preco: [dict(produto_id=p, descricao="", quantidade=q, preco_unit=preco)]
+    db.registrar_venda(con, a, "2026-03-10", item(2, 17000))
+    db.registrar_venda(con, b, "2026-03-20", item(1, 20000))
+    db.registrar_venda(con, b, "2026-07-01", item(1, 20000))
+    db.cancelar_venda(con, db.registrar_venda(con, a, "2026-07-02", item(5, 20000)))
+    db.registrar_venda(con, a, "2025-12-31", item(1, 20000))                  # outro ano
+    r = db.relatorio_produto(con, p, 2026)
+    assert (r["meses"][2]["quantidade"], r["meses"][2]["total"]) == (3, 54000)
+    assert (r["meses"][6]["quantidade"], r["quantidade"], r["total"], r["maior_mes"]) == (1, 4, 74000, 54000)
+    assert [(c["nome"], c["quantidade"]) for c in r["clientes"]] == [("Hugo", 2), ("Gil", 2)]   # empate: quem gastou mais
+    assert r["descontos"] == 6000
+    assert len(r["ultimas"]) == 4 and r["ultimas"][0]["data"] == "2026-07-01"   # de sempre, sem a cancelada
+
+
+def test_relatorio_mensal_agrupa_produto_pelo_cadastro(con):
+    c = db.criar_cliente(con, "Ivo")
+    p = db.criar_produto(con, "Batom", 3000)
+    db.registrar_venda(con, c, "2026-11-01", [dict(produto_id=p, descricao="", quantidade=1, preco_unit=3000)])
+    db.atualizar_produto(con, p, "Batom Matte", 3000, True)                     # mudou de nome depois
+    db.registrar_venda(con, c, "2026-11-02", [dict(produto_id=p, descricao="", quantidade=2, preco_unit=3000),
+                                              dict(produto_id=None, descricao="Embrulho", quantidade=1, preco_unit=500)])
+    linhas = [(l["produto_id"], l["descricao"], l["quantidade"]) for l in db.vendas_por_produto_mes(con, "2026-11")]
+    assert linhas == [(p, "Batom Matte", 3), (None, "Embrulho", 1)]
+
+
+def test_telas_novas_pelo_site(cliente_http):
+    http, banco = cliente_http
+    http.post("/entrar", data={"senha": "segredo"})
+    con = db.conectar(banco)
+    ativa = db.criar_cliente(con, "Joana Ativa", saldo_inicial=1000, saldo_inicial_data="2026-01-01")
+    parada = db.criar_cliente(con, "Lara Parada", saldo_inicial=4000, saldo_inicial_data="2025-01-01")
+    db.atualizar_cliente(con, parada, "Lara Parada", "", "", 4000, False)
+    p = db.criar_produto(con, "Colônia", 5000)
+    con.close()
+    inicio = http.get("/").get_data(as_text=True)
+    assert "R$ 50,00" in inicio                       # total a receber inclui a desativada (10 + 40)
+    assert "sem pagar há mais de 60 dias" in inicio
+    so_desativados = http.get("/clientes?mostrar=desativados").get_data(as_text=True)
+    assert "Lara Parada" in so_desativados and "Joana Ativa" not in so_desativados
+    ativos = http.get("/clientes").get_data(as_text=True)
+    assert "Joana Ativa" in ativos and "Lara Parada" not in ativos
+    assert "Lara Parada" in http.get("/clientes?mostrar=todos").get_data(as_text=True)
+    sem_pagar = http.get("/clientes/sem-pagar?dias=180").get_data(as_text=True)
+    assert "Lara Parada" in sem_pagar and "nenhum pagamento registrado" in sem_pagar
+    assert http.get("/clientes/sem-pagar?dias=7").status_code == 200           # opção inválida cai no padrão
+    produto = http.get(f"/produtos/{p}").get_data(as_text=True)
+    assert "Colônia" in produto and "Este produto ainda não foi vendido" in produto
+    assert http.get("/produtos/999").status_code == 404
+
+
+def test_sem_pagar_mostra_data_do_ultimo_dia_do_mes_da_planilha(cliente_http):
+    http, banco = cliente_http
+    http.post("/entrar", data={"senha": "segredo"})
+    con = db.conectar(banco)
+    for nome, mes in [("Nair Fevereiro", "2024-02"), ("Olga Setembro", "2025-09"), ("Pia Dezembro", "2025-12")]:
+        c = db.criar_cliente(con, nome, saldo_inicial=1000, saldo_inicial_data="2026-11-01")
+        with con:
+            con.execute("UPDATE clientes SET ultimo_pagamento_planilha = ? WHERE id = ?", (mes, c))
+    con.close()
+    pagina = http.get("/clientes/sem-pagar?dias=30").get_data(as_text=True)
+    for data in ("29/02/2024", "30/09/2025", "31/12/2025"):          # ano bissexto, mês de 30 e virada de ano
+        assert f'último pagamento em {data} <span class="origem">(planilha)</span>' in pagina
+    assert "último pagamento na planilha:" not in pagina
+
+
+# ---------------------------------------------------------------- código, tipo e marca do produto
+
+def test_codigo_tipo_e_marca(con):
+    p = db.criar_produto(con, "Essencial 100 ml", 20000, codigo=" 73 455 ", marca="NATURA", tipo="perfume")
+    x = db.produto(con, p)
+    assert (x["codigo"], x["marca"], x["tipo"]) == ("73455", "Natura", "Perfume")       # padronizado
+    db.criar_produto(con, "Sem código 1", 100)
+    db.criar_produto(con, "Sem código 2", 100, codigo="  ")                           # vários sem código: ok
+    with pytest.raises(ErroDeCadastro, match='já é do produto "Essencial 100 ml"'):
+        db.criar_produto(con, "Outro", 100, codigo="73455")
+    q = db.criar_produto(con, "Batom", 100, codigo="ab-1", marca="o boticário")
+    with pytest.raises(ErroDeCadastro):
+        db.criar_produto(con, "Batom 2", 100, codigo="AB-1")                          # sem diferença de maiúscula
+    assert db.marcas(con) == ["Natura", "O Boticário"] and db.tipos(con) == ["Perfume"]
+
+
+def test_editar_mantem_ou_apaga_codigo_tipo_marca(con):
+    p = db.criar_produto(con, "Creme", 100, codigo="C1", marca="Natura", tipo="Hidratante")
+    db.atualizar_produto(con, p, "Creme", 150, True)                                # sem passar: mantém
+    x = db.produto(con, p)
+    assert (x["codigo"], x["marca"], x["tipo"], x["preco"]) == ("C1", "Natura", "Hidratante", 150)
+    db.atualizar_produto(con, p, "Creme", 150, True, codigo="c1", marca="", tipo="")   # o próprio código: ok
+    x = db.produto(con, p)
+    assert (x["codigo"], x["marca"], x["tipo"]) == ("c1", "", "")
+    outro = db.criar_produto(con, "Loção", 100, codigo="L1")
+    with pytest.raises(ErroDeCadastro):
+        db.atualizar_produto(con, outro, "Loção", 100, True, codigo="C1")
+
+
+def test_banco_antigo_ganha_codigo_tipo_marca(tmp_path):
+    import sqlite3
+    arq = str(tmp_path / "v.db")
+    velho = sqlite3.connect(arq)
+    velho.executescript("""CREATE TABLE produtos (id INTEGER PRIMARY KEY, nome TEXT NOT NULL, nome_busca TEXT NOT NULL UNIQUE,
+                           preco INTEGER NOT NULL, estoque INTEGER NOT NULL DEFAULT 0, ativo INTEGER NOT NULL DEFAULT 1, criado_em TEXT);
+                           INSERT INTO produtos (nome, nome_busca, preco) VALUES ('Antigo', 'antigo', 500);""")
+    velho.commit(); velho.close()
+    con = db.conectar(arq)
+    p = con.execute("SELECT * FROM produtos").fetchone()
+    assert (p["codigo"], p["marca"], p["tipo"]) == (None, "", "")
+    con.close()
+
+
+def test_cadastro_de_produto_pelo_site_e_excel(cliente_http, tmp_path):
+    http, banco = cliente_http
+    http.post("/entrar", data={"senha": "segredo"})
+    http.post("/produtos", data={"tipo": "perfume", "marca": "natura", "nome": "Kaiak", "codigo": "K9", "preco": "150", "estoque": "2"})
+    r = http.post("/produtos", data={"nome": "Kaiak 2", "codigo": "k9", "preco": "1"}, follow_redirects=True)
+    assert 'O código &#34;k9&#34; já é do produto &#34;Kaiak&#34;' in r.get_data(as_text=True) or \
+           'O código "k9" já é do produto "Kaiak"' in r.get_data(as_text=True)
+    lista = http.get("/produtos").get_data(as_text=True)
+    assert "Perfume · Natura · cód. K9" in lista
+    arq = tmp_path / "e.xlsx"
+    arq.write_bytes(http.get("/exportar.xlsx").data)
+    ws = openpyxl.load_workbook(arq)["Produtos"]
+    assert [c.value for c in ws[1]][:4] == ["Produto", "Tipo", "Marca", "Código"]
+    assert [c.value for c in ws[2]][:4] == ["Kaiak", "Perfume", "Natura", "K9"]

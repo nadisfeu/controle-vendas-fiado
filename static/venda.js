@@ -29,18 +29,22 @@
     const lista = $('produtos');
     if (!lista) return;
     const q = normalizar($('busca-produto').value);
+    const tipo = $('filtro-tipo') ? $('filtro-tipo').value : '', marca = $('filtro-marca') ? $('filtro-marca').value : '';
     lista.innerHTML = '';
     for (const p of produtos) {
-      if (!normalizar(p.nome).includes(q)) continue;
+      if (!normalizar([p.nome, p.codigo, p.tipo, p.marca].join(' ')).includes(q)) continue;
+      if ((tipo && p.tipo !== tipo) || (marca && p.marca !== marca)) continue;
       const li = document.createElement('li');
       const b = document.createElement('button');
       b.type = 'button';
       b.className = 'produto';
       const qtd = noCarrinho(p.id);
       const resta = p.estoque - qtd;
-      b.innerHTML = '<span class="nome"></span><span class="preco"></span><span class="estoque"></span>' +
+      b.innerHTML = '<span class="nome"></span><span class="extra"></span><span class="preco"></span><span class="estoque"></span>' +
         (qtd ? `<span class="qtd">${qtd}</span>` : '');
       b.querySelector('.nome').textContent = p.nome;
+      const extra = [p.tipo, p.marca, p.codigo && 'cód. ' + p.codigo].filter(Boolean).join(' · ');
+      if (extra) b.querySelector('.extra').textContent = extra; else b.querySelector('.extra').remove();
       b.querySelector('.preco').textContent = 'R$ ' + p.preco;
       const est = b.querySelector('.estoque');
       est.textContent = resta > 0 ? `restam ${resta}` : (resta === 0 ? 'sem estoque' : `faltam ${-resta}`);
@@ -157,6 +161,7 @@
   });
   const busca = $('busca-produto');
   if (busca) busca.addEventListener('input', desenharProdutos);
+  for (const id of ['filtro-tipo', 'filtro-marca']) if ($(id)) $(id).addEventListener('change', desenharProdutos);
   $('form-venda').addEventListener('submit', () => { $('salvar').disabled = true; });  // evita salvar duas vezes
 
   desenhar();

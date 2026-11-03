@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block titulo %}Sem pagar{% endblock %}
+{% block conteudo %}
+<a class="voltar nao-imprimir" href="{{ url_for('clientes') }}">← Clientes</a>
+<div class="cabecalho-pagina">
+  <h1>Há muito tempo sem pagar</h1>
+  <button class="botao nao-imprimir" type="button" onclick="window.print()">🖨️ Imprimir lista</button>
+</div>
+
+<details class="ajuda nao-imprimir">
+  <summary>Como usar</summary>
+  <p>Aqui aparece quem <b>está devendo</b> e não paga há mais tempo do que o escolhido, começando por quem está
+  há mais tempo. Toque no nome para abrir o cliente, ou no telefone para ligar.</p>
+  <p>O último pagamento vem do sistema ou, se for mais antigo, da <b>planilha antiga</b>. Na planilha só se sabe
+  o mês, então conta como pago no <b>último dia daquele mês</b> e aparece "(planilha)" do lado.
+  "Nenhum pagamento registrado" quer dizer que não achamos pagamento nem no sistema nem na planilha:
+  conta desde quando a dívida entrou no sistema.</p>
+</details>
+
+<form method="get" class="filtros filtros-mes nao-imprimir">
+  <label>Sem pagar há mais de
+    <select name="dias" onchange="this.form.submit()">
+      {% for o in opcoes %}<option value="{{ o }}" {{ 'selected' if o == dias }}>{{ o }} dias</option>{% endfor %}
+    </select>
+  </label>
+</form>
+
+{% if lista %}
+<p class="resumo-grafico"><b>{{ lista|length }} cliente{{ 's' if lista|length > 1 }}</b> devendo
+  <b>{{ total|reais }}</b> no total, sem pagar há mais de {{ dias }} dias.</p>
+<ul class="lista lista-clientes lista-atraso">
+  {% for c in lista %}
+  <li>
+    <div class="atraso-linha">
+      <span class="atraso-info">
+        <a class="nome" href="{{ url_for('cliente_ver', cliente_id=c.id) }}">{{ c.nome }}</a>{% if not c.ativo %} <small>(desativado)</small>{% endif %}
+        <small>
+          {% if c.origem == 'sistema' %}último pagamento em {{ c.referencia|data_br }}
+          {% elif c.origem == 'planilha' %}último pagamento em {{ c.referencia|data_br }} <span class="origem">(planilha)</span>
+          {% else %}nenhum pagamento registrado (deve desde {{ c.referencia|data_br }}){% endif %}
+          {% if c.telefone %} · <a href="tel:{{ c.telefone }}">📞 {{ c.telefone }}</a>{% endif %}
+        </small>
+      </span>
+      <span class="atraso-numeros">
+        <span class="saldo devendo">{{ c.saldo|reais }}</span>
+        <small class="atraso-dias">há {{ c.dias }} dias</small>
+      </span>
+    </div>
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<p class="vazio">Ninguém está devendo há mais de {{ dias }} dias sem pagar. 🎉</p>
+{% endif %}
+{% endblock %}
