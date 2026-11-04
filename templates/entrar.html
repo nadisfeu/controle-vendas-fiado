@@ -6,6 +6,7 @@
   <p class="dica">Digite a senha para entrar.</p>
   {% if erro %}<div class="aviso aviso-erro">{{ erro }}</div>{% endif %}
   <form method="post">
+  <input type="hidden" name="csrf" value="{{ csrf_token() }}">
     <label>Senha <input type="password" name="senha" autofocus required></label>
     <button class="botao botao-principal" type="submit">Entrar</button>
   </form>

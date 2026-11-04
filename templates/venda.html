@@ -45,6 +45,7 @@
     <ul id="carrinho" class="itens-carrinho"></ul>
     <p class="vazio" id="carrinho-vazio">Nenhum item ainda. Toque em um produto ao lado.</p>
     <form method="post" id="form-venda">
+  <input type="hidden" name="csrf" value="{{ csrf_token() }}">
       <input type="hidden" name="itens" id="campo-itens">
       <div class="total">Total: <span id="total">R$ 0,00</span></div>
       <p class="descontos-venda" id="descontos" hidden>Descontos nesta venda: <b id="descontos-valor"></b></p>

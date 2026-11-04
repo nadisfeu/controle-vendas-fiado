@@ -4,6 +4,7 @@
 <a class="voltar" href="{{ url_for('produto_ver', produto_id=p.id) }}">← {{ p.nome }}</a>
 <h1>Editar produto</h1>
 <form method="post" class="cartao formulario">
+  <input type="hidden" name="csrf" value="{{ csrf_token() }}">
   <label><span>Tipo <small>(opcional, ex.: Perfume)</small></span>
     <input name="tipo" list="lista-tipos" autocomplete="off" value="{{ form.get('tipo', p.tipo) }}"></label>
   <label><span>Marca <small>(opcional, ex.: Natura)</small></span>

@@ -183,7 +183,8 @@ def test_importacao_falha_saldo_sem_nome(tmp_path):
 
 @pytest.fixture
 def cliente_http(tmp_path):
-    app = criar_app(banco=str(tmp_path / "w.db"), senha="segredo", chave="chave-teste")
+    # CSRF desligado só aqui: estes testes enviam formulário direto; os do navegador usam o código de verdade
+    app = criar_app(banco=str(tmp_path / "w.db"), senha="segredo", chave="chave-teste", csrf=False)
     app.config["TESTING"] = True
     return app.test_client(), str(tmp_path / "w.db")
 
@@ -740,3 +741,163 @@ def test_cadastro_de_produto_pelo_site_e_excel(cliente_http, tmp_path):
     ws = openpyxl.load_workbook(arq)["Produtos"]
     assert [c.value for c in ws[1]][:4] == ["Produto", "Tipo", "Marca", "Código"]
     assert [c.value for c in ws[2]][:4] == ["Kaiak", "Perfume", "Natura", "K9"]
+
+
+
+# ---------------------------------------------------------------- segurança e backup (preparação para a internet)
+
+def _app(tmp_path, **kw):
+    banco = str(tmp_path / "s.db")
+    db.conectar(banco).close()
+    app = criar_app(banco=banco, senha="senha-certa-123", chave="k" * 32, **kw)
+    app.config["TESTING"] = True
+    return app, banco
+
+
+def _csrf_da_pagina(http, url):
+    import re
+    return re.search(r'name="csrf" value="([^"]+)"', http.get(url).get_data(as_text=True)).group(1)
+
+
+def test_csrf_recusa_formulario_sem_codigo(tmp_path):
+    app, banco = _app(tmp_path)
+    http = app.test_client()
+    assert http.post("/entrar", data={"senha": "senha-certa-123"}).status_code == 400        # sem código
+    token = _csrf_da_pagina(http, "/entrar")
+    assert http.post("/entrar", data={"senha": "senha-certa-123", "csrf": token}).status_code == 302
+    r = http.post("/clientes/novo", data={"nome": "Intrusa", "csrf": "codigo-falso"})
+    assert r.status_code == 400 and "Formulário expirado" in r.get_data(as_text=True)
+    token = _csrf_da_pagina(http, "/clientes/novo")
+    assert http.post("/clientes/novo", data={"nome": "Legítima", "csrf": token}).status_code == 302
+    con = db.conectar(banco)
+    assert [c["nome"] for c in db.saldos(con)] == ["Legítima"]
+    con.close()
+
+
+def test_bloqueio_depois_de_varias_senhas_erradas(tmp_path):
+    app, _ = _app(tmp_path, csrf=False)
+    http = app.test_client()
+    for _ in range(5):
+        assert "Senha incorreta" in http.post("/entrar", data={"senha": "chute"}).get_data(as_text=True)
+    r = http.post("/entrar", data={"senha": "senha-certa-123"})            # até a certa fica bloqueada
+    assert r.status_code == 429 and "Muitas tentativas" in r.get_data(as_text=True)
+    outro = app.test_client()                                               # outro endereço não é afetado
+    r = outro.post("/entrar", data={"senha": "senha-certa-123"}, environ_base={"REMOTE_ADDR": "10.0.0.9"})
+    assert r.status_code == 302
+
+
+def test_acertar_a_senha_zera_os_erros(tmp_path):
+    app, _ = _app(tmp_path, csrf=False)
+    http = app.test_client()
+    for _ in range(4):
+        http.post("/entrar", data={"senha": "chute"})
+    assert http.post("/entrar", data={"senha": "senha-certa-123"}).status_code == 302
+    for _ in range(4):
+        http.post("/entrar", data={"senha": "chute"})
+    assert http.post("/entrar", data={"senha": "senha-certa-123"}).status_code == 302
+
+
+def test_cabecalhos_de_seguranca_e_cookie_seguro(tmp_path):
+    app, _ = _app(tmp_path, csrf=False, cookie_seguro=True)
+    http = app.test_client()
+    r = http.post("/entrar", data={"senha": "senha-certa-123"}, base_url="https://localhost")
+    assert "Secure" in r.headers["Set-Cookie"] and "HttpOnly" in r.headers["Set-Cookie"]
+    for h, v in [("X-Frame-Options", "DENY"), ("X-Content-Type-Options", "nosniff"), ("Cache-Control", "no-store")]:
+        assert r.headers[h] == v
+    assert "max-age" in r.headers["Strict-Transport-Security"]
+
+
+def test_aviso_de_backup_no_inicio(tmp_path):
+    app, banco = _app(tmp_path, csrf=False)
+    http = app.test_client()
+    http.post("/entrar", data={"senha": "senha-certa-123"})
+    assert "Nenhuma cópia de segurança baixada ainda" in http.get("/").get_data(as_text=True)
+    assert http.get("/backup.db").status_code == 200
+    assert "cópia de segurança" not in http.get("/").get_data(as_text=True)
+    con = db.conectar(banco)
+    db.gravar_meta(con, "ultimo_backup_baixado", "2020-01-01T10:00:00")
+    con.close()
+    assert "Última cópia de segurança há" in http.get("/").get_data(as_text=True)
+    http.get("/exportar.xlsx")                                              # baixar o Excel também conta
+    assert "cópia de segurança" not in http.get("/").get_data(as_text=True)
+
+
+def test_copia_automatica_diaria_guarda_as_ultimas_14(tmp_path):
+    import sqlite3
+    pasta = tmp_path / "copias"
+    pasta.mkdir()
+    for i in range(1, 17):                                                   # 16 cópias velhas
+        (pasta / f"copia_2026-01-{i:02d}.db").write_bytes(b"velha")
+    app, banco = _app(tmp_path, csrf=False, pasta_copias=str(pasta))
+    con = db.conectar(banco)
+    db.criar_cliente(con, "Cliente da Cópia")
+    con.close()
+    app.test_client().get("/entrar")
+    copias = sorted(p.name for p in pasta.glob("copia_*.db"))
+    assert len(copias) == 14 and copias[-1] == f"copia_{date.today().isoformat()}.db"
+    assert "copia_2026-01-01.db" not in copias                               # as mais velhas saíram
+    hoje = sqlite3.connect(pasta / copias[-1])
+    assert hoje.execute("SELECT nome FROM clientes").fetchone()[0] == "Cliente da Cópia"   # cópia real e completa
+    hoje.close()
+    app.test_client().get("/entrar")                                         # segunda visita do dia: não repete
+    assert len(list(pasta.glob("copia_*.db"))) == 14
+
+
+def test_copia_automatica_que_falha_avisa_mas_nao_derruba(tmp_path):
+    arquivo_no_lugar_da_pasta = tmp_path / "nao_e_pasta"
+    arquivo_no_lugar_da_pasta.write_text("x")
+    app, _ = _app(tmp_path, csrf=False, pasta_copias=str(arquivo_no_lugar_da_pasta))
+    http = app.test_client()
+    assert http.post("/entrar", data={"senha": "senha-certa-123"}).status_code == 302
+    assert "A cópia automática do dia falhou" in http.get("/").get_data(as_text=True)
+
+
+def _importar_wsgi_com_env_valido(tmp_path, monkeypatch):
+    """wsgi.py monta o site ao ser importado (é o que a hospedagem faz): precisa de um .env válido antes."""
+    import importlib, sys as _sys
+    monkeypatch.setenv("APP_SENHA", "abacate-bolo-janela-vento-42")
+    monkeypatch.setenv("APP_CHAVE", "c" * 64)
+    db.conectar(str(tmp_path / "ok.db")).close()
+    monkeypatch.setenv("APP_BANCO", str(tmp_path / "ok.db"))
+    monkeypatch.setenv("APP_PASTA_COPIAS", str(tmp_path / "copias"))
+    _sys.modules.pop("wsgi", None)
+    return importlib.import_module("wsgi")
+
+
+def test_wsgi_falha_alto_sem_banco_ou_com_senha_fraca(tmp_path, monkeypatch):
+    wsgi = _importar_wsgi_com_env_valido(tmp_path, monkeypatch)
+    monkeypatch.setattr(wsgi, "PASTA", tmp_path)                             # sem .env nesta pasta
+    for k in ("APP_SENHA", "APP_CHAVE", "APP_BANCO"):
+        monkeypatch.delenv(k, raising=False)
+    with pytest.raises(RuntimeError, match="faltam no .env"):
+        wsgi.montar()
+    monkeypatch.setenv("APP_SENHA", "curta")
+    monkeypatch.setenv("APP_CHAVE", "c" * 64)
+    with pytest.raises(RuntimeError, match="muito curta"):
+        wsgi.montar()
+    monkeypatch.setenv("APP_SENHA", "abacate-bolo-janela-vento-42")
+    monkeypatch.setenv("APP_BANCO", str(tmp_path / "nao_existe.db"))
+    with pytest.raises(RuntimeError, match="banco não encontrado"):
+        wsgi.montar()
+    assert not (tmp_path / "nao_existe.db").exists()                         # não criou banco vazio
+    db.conectar(str(tmp_path / "ok.db")).close()
+    monkeypatch.setenv("APP_BANCO", str(tmp_path / "ok.db"))
+    monkeypatch.setenv("APP_PASTA_COPIAS", str(tmp_path / "copias"))
+    app = wsgi.montar()
+    assert app.config["SESSION_COOKIE_SECURE"] and app.config["CSRF"]
+    import time as _t
+    assert _t.strftime("%Z") in ("-03", "BRT", "-02", "BRST")                 # fuso de São Paulo
+
+
+def test_wsgi_importa_com_env_valido(tmp_path, monkeypatch):
+    """O PythonAnywhere faz 'from wsgi import application': isso tem que funcionar com o .env certo."""
+    import importlib, sys as _sys
+    monkeypatch.setenv("APP_SENHA", "abacate-bolo-janela-vento-42")
+    monkeypatch.setenv("APP_CHAVE", "c" * 64)
+    db.conectar(str(tmp_path / "ok.db")).close()
+    monkeypatch.setenv("APP_BANCO", str(tmp_path / "ok.db"))
+    monkeypatch.setenv("APP_PASTA_COPIAS", str(tmp_path / "copias"))
+    _sys.modules.pop("wsgi", None)
+    modulo = importlib.import_module("wsgi")
+    http = modulo.application.test_client()
+    assert http.get("/entrar").status_code == 200 and http.get("/").status_code == 302

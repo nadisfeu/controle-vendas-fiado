@@ -11,6 +11,7 @@ Regras que este módulo garante:
 """
 import re
 import sqlite3
+from pathlib import Path
 import unicodedata
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
@@ -67,6 +68,10 @@ CREATE TABLE IF NOT EXISTS pagamentos (
     cancelado_em TEXT,
     criado_em    TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
+CREATE TABLE IF NOT EXISTS meta (           -- anotações do sistema (ex.: quando foi o último backup)
+    chave TEXT PRIMARY KEY,
+    valor TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS ix_vendas_cliente ON vendas(cliente_id);
 CREATE INDEX IF NOT EXISTS ix_itens_venda ON itens_venda(venda_id);
 CREATE INDEX IF NOT EXISTS ix_pagamentos_cliente ON pagamentos(cliente_id);
@@ -111,6 +116,30 @@ def _atualizar_banco_antigo(con):
     if "ultimo_pagamento_planilha" not in colunas:
         with con:
             con.execute("ALTER TABLE clientes ADD COLUMN ultimo_pagamento_planilha TEXT")
+
+
+def ler_meta(con, chave):
+    linha = con.execute("SELECT valor FROM meta WHERE chave = ?", (chave,)).fetchone()
+    return linha["valor"] if linha else None
+
+
+def gravar_meta(con, chave, valor):
+    with con:
+        con.execute("INSERT INTO meta (chave, valor) VALUES (?, ?)"
+                    " ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor", (chave, valor))
+
+
+def copiar_banco(con, destino):
+    """Cópia consistente do banco (API de backup do SQLite: segura mesmo com o site usando o banco)."""
+    destino = Path(destino)
+    destino.parent.mkdir(parents=True, exist_ok=True)
+    temporario = destino.with_suffix(".tmp")
+    copia = sqlite3.connect(temporario)
+    try:
+        con.backup(copia)
+    finally:
+        copia.close()
+    temporario.replace(destino)          # só aparece com o nome final quando está completa
 
 
 # ---------------------------------------------------------------- texto e dinheiro

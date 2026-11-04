@@ -72,7 +72,7 @@ mês novo, e muito trabalho manual.
 
 ## Testes
 
-119 testes: regras de saldo, dinheiro, estoque, desconto, importação, impressão, gráficos, filtros — e testes num
+128 testes: regras de saldo, dinheiro, estoque, desconto, importação, impressão, gráficos, filtros — e testes num
 navegador de verdade (Chromium via Playwright) que clicam pelas telas em tamanho de celular,
 conferem que não há erro de JavaScript e que nenhuma tela passa da largura do celular.
 As cores têm contraste conferido (4,5:1 ou mais) nos dois temas.
@@ -109,13 +109,20 @@ Para os testes de navegador: `pip install playwright && python -m playwright ins
 | `importar_planilha.py` | importa clientes e saldo de uma aba da planilha antiga |
 | `importar_ultimos_pagamentos.py` | lê na planilha antiga o último mês em que cada cliente pagou |
 | `relatorio_saldos_sumidos.py` | lista saldos que sumiram de um mês para o outro na planilha antiga |
+| `wsgi.py` | entrada do site na hospedagem (confere a configuração antes de subir) |
 | `demo.py` | banco de demonstração com um ano de vendas fictícias |
 | `templates/`, `static/` | telas (HTML, CSS e um pouco de JavaScript, sem framework) |
 | `tests/` | `test_sistema.py` (regras e site) e `test_navegador.py` (cliques no navegador) |
 
+## Na internet
+
+Pronto para o PythonAnywhere (passo a passo em [`PUBLICAR.md`](PUBLICAR.md)): `wsgi.py` só sobe com senha
+forte e banco existente, login com bloqueio depois de 5 erros, proteção CSRF em todo formulário, cookie só
+por HTTPS, cabeçalhos de segurança, fuso de São Paulo (servidores rodam em UTC), cópia automática diária
+do banco e aviso quando ninguém baixa uma cópia há mais de 7 dias.
+
 ## Próximos passos
 
-- Colocar online (hoje roda no computador), com HTTPS e backup automático.
 - Desconto no total da venda, além do desconto por item.
 
 Todos os nomes e valores nas imagens e no `demo.py` são fictícios.

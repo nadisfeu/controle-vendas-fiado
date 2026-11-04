@@ -31,6 +31,18 @@
   </div>
 </section>
 
+{% if erro_copia %}
+<div class="aviso aviso-erro">⚠ A cópia automática do dia falhou ({{ erro_copia }}). Baixe uma cópia em
+  <a href="{{ url_for('relatorios') }}">Relatórios</a> e avise quem cuida do sistema.</div>
+{% endif %}
+{% if aviso_backup %}
+<a class="cartao alerta-atraso alerta-backup" href="{{ url_for('backup') }}">
+  <span class="alerta-icone" aria-hidden="true">💾</span>
+  <span><b>{% if dias_sem_backup is none %}Nenhuma cópia de segurança baixada ainda{% else %}Última cópia de segurança há {{ dias_sem_backup }} dias{% endif %}</b>
+    <small>toque aqui para baixar uma agora e guarde no celular, no e-mail ou no Google Drive</small></span>
+  <span class="alerta-seta" aria-hidden="true">↓</span>
+</a>
+{% endif %}
 {% if atrasados %}
 <a class="cartao alerta-atraso" href="{{ url_for('clientes_sem_pagar', dias=dias_atraso) }}">
   <span class="alerta-icone" aria-hidden="true">⏰</span>

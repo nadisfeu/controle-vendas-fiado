@@ -17,6 +17,7 @@
 </details>
 
 <form method="post" class="cartao formulario em-linha form-produto">
+  <input type="hidden" name="csrf" value="{{ csrf_token() }}">
   <h2>Cadastrar produto</h2>
   <label><span>Tipo <small>(opcional)</small></span> <input name="tipo" list="lista-tipos" value="{{ form.get('tipo', '') }}" placeholder="ex.: Perfume" autocomplete="off"></label>
   <label><span>Marca <small>(opcional)</small></span> <input name="marca" list="lista-marcas" value="{{ form.get('marca', '') }}" placeholder="ex.: Natura" autocomplete="off"></label>

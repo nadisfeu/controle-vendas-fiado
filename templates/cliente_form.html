@@ -4,6 +4,7 @@
 <a class="voltar" href="{{ url_for('cliente_ver', cliente_id=c.id) if c else url_for('clientes') }}">← Voltar</a>
 <h1>{{ 'Editar cadastro' if c else 'Novo cliente' }}</h1>
 <form method="post" class="cartao formulario">
+  <input type="hidden" name="csrf" value="{{ csrf_token() }}">
   <label><span>Nome <span class="obrigatorio">*</span></span>
     <input name="nome" required value="{{ form.get('nome', c.nome if c else '') }}" autofocus>
     <small>Use um nome que identifique bem, por exemplo "Marta Jardim". Não dá para ter dois clientes com o mesmo nome.</small>

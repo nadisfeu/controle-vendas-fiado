@@ -414,3 +414,5 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--principal);
 .filtros-produtos input[type=search] { flex: 1 1 100%; }
 .filtros-produtos select { flex: 1 1 calc(50% - 8px); min-width: 0; width: auto; }
 @media (min-width: 700px) { .filtros-produtos select { flex: 1 1 0; } }   /* PC: os 5 lado a lado, mesmo tamanho */
+.alerta-backup { border-color: var(--principal); background: var(--cartao); }
+.alerta-backup .alerta-seta { color: var(--principal); }

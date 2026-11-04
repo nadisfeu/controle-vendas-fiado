@@ -10,6 +10,7 @@
 </section>
 
 <form method="post" class="cartao formulario">
+  <input type="hidden" name="csrf" value="{{ csrf_token() }}">
   <label><span>Valor pago <span class="obrigatorio">*</span></span>
     <input name="valor" id="valor" inputmode="decimal" required placeholder="ex.: 100,00"
            value="{{ form.get('valor', '') }}" autofocus>

@@ -6,7 +6,9 @@ import hmac
 import io
 import json
 import os
+import secrets
 import sys
+import time
 from datetime import date, datetime
 from functools import wraps
 from pathlib import Path
@@ -21,6 +23,16 @@ from db import ErroDeCadastro
 PASTA = Path(__file__).resolve().parent
 OPCOES_DIAS_SEM_PAGAR = (30, 60, 90, 180)
 DIAS_SEM_PAGAR_PADRAO = 60
+MAX_TENTATIVAS_SENHA = 5            # erros seguidos de senha antes de bloquear...
+BLOQUEIO_SEGUNDOS = 15 * 60         # ...por 15 minutos (por endereço de internet)
+DIAS_AVISO_BACKUP = 7               # aviso no Início se ninguém baixou cópia há 7 dias ou mais
+COPIAS_AUTOMATICAS = 14             # cópias diárias guardadas no servidor
+
+
+def ajustar_fuso():
+    """Servidores costumam rodar em UTC: sem isso, venda lançada às 22h sai com a data de amanhã."""
+    os.environ["TZ"] = os.environ.get("APP_FUSO", "America/Sao_Paulo")
+    time.tzset()
 
 
 def carregar_env(caminho):
@@ -41,11 +53,15 @@ def exigir_env(nome):
     return valor
 
 
-def criar_app(banco, senha, chave, cookie_seguro=False):
+def criar_app(banco, senha, chave, cookie_seguro=False, csrf=True, pasta_copias=None):
+    """cookie_seguro: só manda o login por HTTPS (ligar na internet).
+    csrf: exige o código do formulário em todo POST (só os testes de regra desligam).
+    pasta_copias: onde guardar a cópia automática diária do banco (None = não faz)."""
     app = Flask(__name__)
-    app.config.update(SECRET_KEY=chave, BANCO=banco, SENHA=senha,
+    app.config.update(SECRET_KEY=chave, BANCO=banco, SENHA=senha, CSRF=csrf,
                       SESSION_COOKIE_SAMESITE="Lax", SESSION_COOKIE_HTTPONLY=True,
                       SESSION_COOKIE_SECURE=cookie_seguro)
+    tentativas_erradas = {}          # endereço -> horários dos erros de senha recentes
 
     app.jinja_env.filters["reais"] = db.centavos_para_reais
     app.jinja_env.filters["campo"] = db.centavos_para_campo
@@ -62,6 +78,67 @@ def criar_app(banco, senha, chave, cookie_seguro=False):
         c = g.pop("con", None)
         if c is not None:
             c.close()
+
+    # ------------------------------------------------------------ segurança
+
+    def csrf_token():
+        if "csrf" not in session:
+            session["csrf"] = secrets.token_urlsafe(32)
+        return session["csrf"]
+    app.jinja_env.globals["csrf_token"] = csrf_token
+
+    @app.before_request
+    def checar_csrf():
+        """Todo formulário leva um código secreto da sessão: outro site não consegue enviar por ela."""
+        if request.method == "POST" and app.config["CSRF"]:
+            enviado, esperado = request.form.get("csrf", ""), session.get("csrf", "")
+            if not esperado or not hmac.compare_digest(enviado, esperado):
+                abort(400)
+
+    @app.errorhandler(400)
+    def formulario_expirado(_erro):
+        return render_template("erro.html", titulo="Formulário expirado",
+                               mensagem="Esta página ficou aberta por muito tempo ou veio de outro lugar. "
+                                        "Volte, recarregue a página e tente de novo."), 400
+
+    @app.after_request
+    def cabecalhos_de_seguranca(resposta):
+        resposta.headers["X-Content-Type-Options"] = "nosniff"
+        resposta.headers["X-Frame-Options"] = "DENY"
+        resposta.headers["Referrer-Policy"] = "same-origin"
+        if not request.path.startswith("/static/"):
+            resposta.headers["Cache-Control"] = "no-store"     # dados de clientes não ficam no cache
+        if app.config["SESSION_COOKIE_SECURE"]:
+            resposta.headers["Strict-Transport-Security"] = "max-age=31536000"
+        return resposta
+
+    def endereco():
+        # no PythonAnywhere o endereço real de quem acessa vem neste cabeçalho
+        return request.headers.get("X-Real-IP") or request.remote_addr or "?"
+
+    # ------------------------------------------------------------ cópia automática
+
+    @app.before_request
+    def copia_do_dia():
+        """Na primeira visita do dia, guarda uma cópia do banco no servidor (fica as últimas 14).
+
+        Não substitui baixar a cópia para fora do servidor: se a conta sumir, estas somem junto.
+        Se falhar, o site continua funcionando e o Início mostra o aviso.
+        """
+        if not pasta_copias or request.path.startswith("/static/"):
+            return
+        destino = Path(pasta_copias) / f"copia_{date.today().isoformat()}.db"
+        if destino.exists():
+            return
+        try:
+            db.copiar_banco(con(), destino)
+            antigas = sorted(Path(pasta_copias).glob("copia_*.db"))[:-COPIAS_AUTOMATICAS]
+            for velha in antigas:
+                velha.unlink()
+            db.gravar_meta(con(), "erro_copia_automatica", "")
+        except Exception as e:      # registra e avisa, mas não derruba a venda que ela está lançando
+            app.logger.exception("cópia automática falhou")
+            db.gravar_meta(con(), "erro_copia_automatica", f"{date.today().isoformat()}: {e}")
 
     def login_obrigatorio(f):
         @wraps(f)
@@ -83,12 +160,21 @@ def criar_app(banco, senha, chave, cookie_seguro=False):
     def entrar():
         erro = None
         if request.method == "POST":
+            agora_s, quem = time.monotonic(), endereco()
+            erros = [t for t in tentativas_erradas.get(quem, []) if agora_s - t < BLOQUEIO_SEGUNDOS]
+            tentativas_erradas[quem] = erros
+            if len(erros) >= MAX_TENTATIVAS_SENHA:
+                espera = int((BLOQUEIO_SEGUNDOS - (agora_s - erros[0])) // 60) + 1
+                return render_template("entrar.html", erro=f"Muitas tentativas com senha errada. "
+                                                           f"Espere {espera} minuto(s) e tente de novo."), 429
             if hmac.compare_digest(request.form.get("senha", "").encode(), app.config["SENHA"].encode()):
+                tentativas_erradas.pop(quem, None)
                 session.clear()
                 session["logado"] = True
                 session.permanent = True
                 proximo = request.args.get("proximo", "")
                 return redirect(proximo if proximo.startswith("/") and not proximo.startswith("//") else "/")
+            erros.append(agora_s)
             erro = "Senha incorreta."
         return render_template("entrar.html", erro=erro)
 
@@ -107,7 +193,12 @@ def criar_app(banco, senha, chave, cookie_seguro=False):
         devendo = sorted((c for c in todos if c["saldo"] > 0), key=lambda c: -c["saldo"])
         mes = hoje()[:7]
         atrasados = db.clientes_sem_pagar(con(), date.today(), DIAS_SEM_PAGAR_PADRAO)
+        ultimo_backup = db.ler_meta(con(), "ultimo_backup_baixado")
+        dias_sem_backup = (date.today() - date.fromisoformat(ultimo_backup[:10])).days if ultimo_backup else None
         return render_template("inicio.html",
+                               dias_sem_backup=dias_sem_backup, aviso_backup=dias_sem_backup is None
+                               or dias_sem_backup >= DIAS_AVISO_BACKUP,
+                               erro_copia=db.ler_meta(con(), "erro_copia_automatica"),
                                total_receber=sum(c["saldo"] for c in devendo),
                                qtd_devendo=len(devendo), qtd_clientes=sum(1 for c in todos if c["ativo"]),
                                atrasados=atrasados, atrasados_total=sum(c["saldo"] for c in atrasados),
@@ -379,12 +470,14 @@ def criar_app(banco, senha, chave, cookie_seguro=False):
     def exportar():
         from exportar import gerar_planilha
         arquivo = gerar_planilha(con())
+        db.gravar_meta(con(), "ultimo_backup_baixado", datetime.now().isoformat(timespec="seconds"))
         return send_file(arquivo, as_attachment=True, download_name=f"vendas_{hoje()}.xlsx",
                          mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
     @app.route("/backup.db")
     @login_obrigatorio
     def backup():
+        db.gravar_meta(con(), "ultimo_backup_baixado", datetime.now().isoformat(timespec="seconds"))
         return send_file(io.BytesIO(con().serialize()), as_attachment=True,
                          download_name=f"backup_vendas_{hoje()}.db", mimetype="application/octet-stream")
 
@@ -393,7 +486,9 @@ def criar_app(banco, senha, chave, cookie_seguro=False):
 
 if __name__ == "__main__":
     carregar_env(PASTA / ".env")
+    ajustar_fuso()
     app = criar_app(banco=os.environ.get("APP_BANCO") or str(PASTA / "dados.db"),
-                    senha=exigir_env("APP_SENHA"), chave=exigir_env("APP_CHAVE"))
+                    senha=exigir_env("APP_SENHA"), chave=exigir_env("APP_CHAVE"),
+                    pasta_copias=os.environ.get("APP_PASTA_COPIAS") or str(PASTA / "backups" / "automaticas"))
     app.jinja_env.auto_reload = True   # mudança nas telas aparece sem reiniciar
     app.run(host="127.0.0.1", port=int(os.environ.get("APP_PORTA", "5000")))

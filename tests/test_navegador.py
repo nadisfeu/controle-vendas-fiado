@@ -398,7 +398,7 @@ def test_telas_novas_no_celular(pagina, site):
     sem_rolagem_lateral(pg)
 
     pg.goto(url + "/")
-    pg.click(".alerta-atraso")
+    pg.click(".alerta-atraso:not(.alerta-backup)")      # o aviso de backup também é um cartão
     assert "/clientes/sem-pagar" in pg.url
     linha = pg.locator(".lista-atraso li:has-text('Marisa Atrasada')")
     assert "nenhum pagamento registrado" in linha.inner_text() and "(desativado)" in linha.inner_text()

@@ -61,6 +61,7 @@
         {% if l.tipo in ('venda', 'pagamento') and not l.cancelado %}
         <form method="post" action="{{ url_for('venda_cancelar', venda_id=l.id) if l.tipo == 'venda' else url_for('pagamento_cancelar', pagamento_id=l.id) }}"
               onsubmit="return confirm('Cancelar {{ 'esta compra' if l.tipo == 'venda' else 'este pagamento' }} de {{ l.valor|reais }}? Use isso só para corrigir um lançamento feito errado.');">
+  <input type="hidden" name="csrf" value="{{ csrf_token() }}">
           <button class="link-perigo" type="submit">cancelar</button>
         </form>
         {% endif %}

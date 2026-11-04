@@ -9,3 +9,4 @@ backups/
 *.xlsx
 *.csv
 *.pdf
+.env.producao
