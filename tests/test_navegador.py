@@ -402,6 +402,8 @@ def test_telas_novas_no_celular(pagina, site):
     assert "/clientes/sem-pagar" in pg.url
     linha = pg.locator(".lista-atraso li:has-text('Marisa Atrasada')")
     assert "nenhum pagamento registrado" in linha.inner_text() and "(desativado)" in linha.inner_text()
+    numeros = linha.locator(".atraso-numeros").inner_text()
+    assert "R$ 310,00" in numeros and "há " in numeros and "deve desde 01/05/2025" in numeros   # dias e data juntos
     assert linha.locator("a[href^='tel:']").count() == 1
     pg.select_option("select[name=dias]", "180")
     pg.wait_for_url("**dias=180**")

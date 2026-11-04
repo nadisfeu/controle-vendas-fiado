@@ -386,6 +386,7 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--principal);
 .atraso-info .nome { font-weight: 600; text-decoration: none; color: var(--texto); }
 .atraso-numeros { display: grid; text-align: right; }
 .atraso-dias { font-weight: 600; color: var(--texto); white-space: nowrap; }
+.atraso-data { color: var(--suave); white-space: nowrap; font-variant-numeric: tabular-nums; }
 
 /* relatório do produto: barras por mês */
 .troca-ano { display: flex; justify-content: center; gap: 20px; align-items: center; margin: 4px 0 16px; }

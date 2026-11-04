@@ -680,8 +680,8 @@ def test_sem_pagar_mostra_data_do_ultimo_dia_do_mes_da_planilha(cliente_http):
     con.close()
     pagina = http.get("/clientes/sem-pagar?dias=30").get_data(as_text=True)
     for data in ("29/02/2024", "30/09/2025", "31/12/2025"):          # ano bissexto, mês de 30 e virada de ano
-        assert f'último pagamento em {data} <span class="origem">(planilha)</span>' in pagina
-    assert "último pagamento na planilha:" not in pagina
+        assert f'pagou em {data}' in pagina
+    assert pagina.count("data aproximada (da planilha antiga)") == 3
 
 
 # ---------------------------------------------------------------- código, tipo e marca do produto
