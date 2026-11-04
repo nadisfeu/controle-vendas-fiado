@@ -27,6 +27,7 @@ MAX_TENTATIVAS_SENHA = 5            # erros seguidos de senha antes de bloquear.
 BLOQUEIO_SEGUNDOS = 15 * 60         # ...por 15 minutos (por endereço de internet)
 DIAS_AVISO_BACKUP = 7               # aviso no Início se ninguém baixou cópia há 7 dias ou mais
 COPIAS_AUTOMATICAS = 14             # cópias diárias guardadas no servidor
+MINUTOS_INATIVO_PADRAO = 60         # sem usar por esse tempo, pede a senha de novo
 
 
 def ajustar_fuso():
@@ -53,10 +54,13 @@ def exigir_env(nome):
     return valor
 
 
-def criar_app(banco, senha, chave, cookie_seguro=False, csrf=True, pasta_copias=None):
+def criar_app(banco, senha, chave, cookie_seguro=False, csrf=True, pasta_copias=None,
+              minutos_inativo=MINUTOS_INATIVO_PADRAO):
     """cookie_seguro: só manda o login por HTTPS (ligar na internet).
     csrf: exige o código do formulário em todo POST (só os testes de regra desligam).
-    pasta_copias: onde guardar a cópia automática diária do banco (None = não faz)."""
+    pasta_copias: onde guardar a cópia automática diária do banco (None = não faz).
+    minutos_inativo: tempo sem uso até pedir a senha de novo. O login também não é guardado:
+    fechar o navegador desconecta (e o limite de tempo cobre o navegador que "restaura" a sessão)."""
     app = Flask(__name__)
     app.config.update(SECRET_KEY=chave, BANCO=banco, SENHA=senha, CSRF=csrf,
                       SESSION_COOKIE_SAMESITE="Lax", SESSION_COOKIE_HTTPONLY=True,
@@ -140,11 +144,24 @@ def criar_app(banco, senha, chave, cookie_seguro=False, csrf=True, pasta_copias=
             app.logger.exception("cópia automática falhou")
             db.gravar_meta(con(), "erro_copia_automatica", f"{date.today().isoformat()}: {e}")
 
+    def marca_da_senha():
+        """Muda quando a senha muda: trocar APP_SENHA derruba todo login feito com a senha antiga."""
+        return hmac.new(app.config["SECRET_KEY"].encode(), app.config["SENHA"].encode(), "sha256").hexdigest()[:32]
+
     def login_obrigatorio(f):
         @wraps(f)
         def envolvido(*a, **kw):
-            if not session.get("logado"):
+            agora_s = time.time()
+            logado = (session.get("logado")
+                      and hmac.compare_digest(session.get("senha_marca", ""), marca_da_senha())
+                      and agora_s - session.get("ultimo_uso", 0) < minutos_inativo * 60)
+            if not logado:
+                expirou = bool(session.get("logado"))
+                session.clear()
+                if expirou:
+                    flash("Por segurança, entre de novo (ficou muito tempo sem uso).", "erro")
                 return redirect(url_for("entrar", proximo=request.path))
+            session["ultimo_uso"] = agora_s
             return f(*a, **kw)
         return envolvido
 
@@ -171,7 +188,9 @@ def criar_app(banco, senha, chave, cookie_seguro=False, csrf=True, pasta_copias=
                 tentativas_erradas.pop(quem, None)
                 session.clear()
                 session["logado"] = True
-                session.permanent = True
+                session["senha_marca"] = marca_da_senha()
+                session["ultimo_uso"] = time.time()
+                session.permanent = False        # cookie some quando o navegador fecha
                 proximo = request.args.get("proximo", "")
                 return redirect(proximo if proximo.startswith("/") and not proximo.startswith("//") else "/")
             erros.append(agora_s)

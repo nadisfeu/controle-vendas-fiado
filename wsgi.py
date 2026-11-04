@@ -34,6 +34,7 @@ def montar():
     ajustar_fuso()
     return criar_app(banco=str(banco), senha=os.environ["APP_SENHA"], chave=os.environ["APP_CHAVE"],
                      cookie_seguro=True,
+                     minutos_inativo=int(os.environ.get("APP_MINUTOS_INATIVO") or 60),
                      pasta_copias=os.environ.get("APP_PASTA_COPIAS") or str(PASTA / "backups" / "automaticas"))
 
 

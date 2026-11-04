@@ -901,3 +901,56 @@ def test_wsgi_importa_com_env_valido(tmp_path, monkeypatch):
     modulo = importlib.import_module("wsgi")
     http = modulo.application.test_client()
     assert http.get("/entrar").status_code == 200 and http.get("/").status_code == 302
+
+
+
+def test_trocar_a_senha_derruba_logins_antigos(tmp_path):
+    """Se a senha vazar e for trocada, quem entrou com a antiga tem que sair na hora."""
+    banco = str(tmp_path / "t.db")
+    db.conectar(banco).close()
+    antes = criar_app(banco=banco, senha="senha-antiga-123", chave="k" * 32, csrf=False)
+    http = antes.test_client()
+    assert http.post("/entrar", data={"senha": "senha-antiga-123"}).status_code == 302
+    assert http.get("/clientes").status_code == 200
+    cookie = http.get_cookie("session").value
+    depois = criar_app(banco=banco, senha="senha-nova-4567", chave="k" * 32, csrf=False)   # mesma chave, senha nova
+    http2 = depois.test_client()
+    http2.set_cookie("session", cookie)
+    r = http2.get("/clientes")
+    assert r.status_code == 302 and "/entrar" in r.headers["Location"]
+    assert http2.post("/entrar", data={"senha": "senha-antiga-123"}).status_code == 200      # a antiga não entra
+    assert http2.post("/entrar", data={"senha": "senha-nova-4567"}).status_code == 302
+
+
+def test_login_antigo_sem_marca_da_senha_e_recusado(tmp_path):
+    """Cookies de antes desta proteção (só com logado=True) não valem mais."""
+    banco = str(tmp_path / "t.db")
+    db.conectar(banco).close()
+    app = criar_app(banco=banco, senha="senha-qualquer-123", chave="k" * 32, csrf=False)
+    http = app.test_client()
+    with http.session_transaction() as s:
+        s["logado"] = True
+    assert http.get("/clientes").status_code == 302
+
+
+
+def test_login_nao_fica_guardado_ao_fechar_o_navegador(tmp_path):
+    app, _ = _app(tmp_path, csrf=False, cookie_seguro=True)
+    r = app.test_client().post("/entrar", data={"senha": "senha-certa-123"}, base_url="https://localhost")
+    cookie = r.headers["Set-Cookie"]
+    assert "Expires" not in cookie and "Max-Age" not in cookie      # cookie de sessão: some ao fechar
+
+
+def test_sai_sozinho_depois_de_muito_tempo_sem_uso(tmp_path):
+    app, _ = _app(tmp_path, csrf=False, minutos_inativo=60)
+    http = app.test_client()
+    http.post("/entrar", data={"senha": "senha-certa-123"})
+    assert http.get("/clientes").status_code == 200
+    with http.session_transaction() as s:
+        s["ultimo_uso"] -= 59 * 60                                     # 59 min parado: ainda vale
+    assert http.get("/clientes").status_code == 200                   # e o uso renova o prazo
+    with http.session_transaction() as s:
+        s["ultimo_uso"] -= 61 * 60                                     # 61 min parado: sai
+    r = http.get("/clientes", follow_redirects=True)
+    assert "entre de novo" in r.get_data(as_text=True)
+    assert http.get("/clientes").status_code == 302
