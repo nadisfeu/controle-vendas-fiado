@@ -114,11 +114,11 @@ def _atualizar_banco_antigo(con):
         with con:
             con.execute("ALTER TABLE produtos ADD COLUMN tipo TEXT NOT NULL DEFAULT ''")
     con.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_produtos_codigo ON produtos(upper(codigo)) WHERE codigo IS NOT NULL")
-    if not ler_meta(con, "produtos_nomes_padronizados_v3"):     # v3: ordem nome, gênero, tamanho, cor
+    if not ler_meta(con, "produtos_nomes_padronizados_v4"):     # v4: ordem nome/gênero/tamanho/cor; XL, 2XL, G1...
         if con.execute("SELECT 1 FROM produtos LIMIT 1").fetchone():
             _copia_antes_de_mudar(con, "organizar_nomes_produtos")
         padronizar_nomes_produtos(con)
-        gravar_meta(con, "produtos_nomes_padronizados_v3", date.today().isoformat())
+        gravar_meta(con, "produtos_nomes_padronizados_v4", date.today().isoformat())
     colunas = {r["name"] for r in con.execute("PRAGMA table_info(clientes)")}
     if "ultimo_pagamento_planilha" not in colunas:
         with con:
@@ -177,7 +177,11 @@ def formatar_nome(texto):
 
 UNIDADES = {"ml", "l", "g", "kg", "mg", "cm", "mm", "m", "un", "und", "pct", "cx"}
 # tamanhos de roupa/calçado: sozinhos (sem número antes) são tamanho, não unidade ("Camiseta G" x "200 g")
-TAMANHOS = {"pp", "p", "m", "g", "gg", "xg", "xgg", "xxg", "eg", "egg", "exg", "u"}
+TAMANHOS = {
+    "ppp", "pp", "p", "m", "g", "gg", "ggg", "u",                       # brasileiros
+    "xg", "xgg", "xxg", "xxxg", "eg", "egg", "exg", "exgg", "g1", "g2", "g3", "g4", "g5",   # grandes
+    "xxs", "xs", "s", "l", "xl", "xxl", "xxxl", "2xl", "3xl", "4xl", "5xl",                 # em inglês
+}
 
 
 def formatar_nome_produto(texto):
@@ -189,12 +193,12 @@ def formatar_nome_produto(texto):
     saida = []
     for i, p in enumerate(palavras):
         anterior_e_numero = i > 0 and palavras[i - 1][:1].isdigit()
-        if i > 0 and p[:1].isdigit():
-            p = p.lower()
-        elif anterior_e_numero and p.lower() in UNIDADES:
-            p = p.lower()
+        if anterior_e_numero and p.lower() in UNIDADES:
+            p = p.lower()                                  # '200 G' -> '200 g', '1 L' -> '1 l'
         elif p.lower() in TAMANHOS:
-            p = p.upper()
+            p = p.upper()                                  # 'xl' -> 'XL', '2xl' -> '2XL', 'g1' -> 'G1'
+        elif i > 0 and p[:1].isdigit():
+            p = p.lower()
         saida.append(p)
     return organizar_nome_produto(" ".join(saida))
 
@@ -216,7 +220,8 @@ def organizar_nome_produto(nome):
     """
     palavras = nome.split(" ")
     chaves = [normalizar(p) for p in palavras]
-    if not any(c in GENEROS or c in TAMANHOS for c in chaves):
+    tem_tamanho = any(c in TAMANHOS and not (i > 0 and chaves[i - 1][:1].isdigit()) for i, c in enumerate(chaves))
+    if not tem_tamanho and not any(c in GENEROS for c in chaves):   # '90 g' é medida, não tamanho
         return nome
 
     def e_extra(i):          # gênero, tamanho ou cor: o que pode sair do meio do nome
