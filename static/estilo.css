@@ -417,3 +417,21 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--principal);
 @media (min-width: 700px) { .filtros-produtos select { flex: 1 1 0; } }   /* PC: os 5 lado a lado, mesmo tamanho */
 .alerta-backup { border-color: var(--principal); background: var(--cartao); }
 .alerta-backup .alerta-seta { color: var(--principal); }
+
+/* produtos repetidos: aviso "não quis dizer...?", lista de pares e tela de juntar */
+.aviso-parecido { border-color: var(--principal); }
+.aviso-parecido h2 { color: var(--principal); }
+.parecido { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 10px 0; border-top: 1px solid var(--borda); }
+.parecido form, .par-acoes form { margin: 0; }
+.nao-e-esse { margin-top: 12px; }
+.nao-e-esse .botao { width: 100%; white-space: normal; }
+.repetidos summary { cursor: pointer; }
+.repetidos summary small { color: var(--suave); font-weight: 400; }
+.par-repetido { flex-wrap: wrap; }
+.par-repetido .produto-nome { flex: 1 1 220px; }
+.par-acoes { display: flex; gap: 8px; flex-wrap: wrap; }
+.opcao-juntar { display: flex !important; grid-template-columns: none !important; align-items: center; gap: 12px;
+  padding: 12px; border: 1px solid var(--borda); border-radius: var(--raio); cursor: pointer; font-weight: 400 !important; }
+.opcao-juntar input { width: auto; min-height: 0; }
+.opcao-juntar:has(input:checked) { border-color: var(--principal); background: var(--fundo); }

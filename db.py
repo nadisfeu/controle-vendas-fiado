@@ -9,8 +9,10 @@ Regras que este módulo garante:
 - O preço do item é copiado para a venda: mudar o preço do produto depois não
   altera vendas antigas.
 """
+import json
 import re
 import sqlite3
+from difflib import SequenceMatcher
 from pathlib import Path
 import unicodedata
 from datetime import date, timedelta
@@ -112,6 +114,9 @@ def _atualizar_banco_antigo(con):
         with con:
             con.execute("ALTER TABLE produtos ADD COLUMN tipo TEXT NOT NULL DEFAULT ''")
     con.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_produtos_codigo ON produtos(upper(codigo)) WHERE codigo IS NOT NULL")
+    if not ler_meta(con, "produtos_nomes_padronizados"):
+        padronizar_nomes_produtos(con)
+        gravar_meta(con, "produtos_nomes_padronizados", date.today().isoformat())
     colunas = {r["name"] for r in con.execute("PRAGMA table_info(clientes)")}
     if "ultimo_pagamento_planilha" not in colunas:
         with con:
@@ -166,6 +171,17 @@ def formatar_nome(texto):
         letra = next((j for j, ch in enumerate(palavra) if ch.isalpha()), None)
         saida.append(palavra if letra is None else palavra[:letra] + palavra[letra].upper() + palavra[letra + 1:])
     return " ".join(saida)
+
+
+UNIDADES = {"ml", "l", "g", "kg", "mg", "cm", "mm", "m", "un", "und", "pct", "cx"}
+
+
+def formatar_nome_produto(texto):
+    """Como formatar_nome, mas unidades e números ficam em minúsculo: 'KAIAK 100ML' -> 'Kaiak 100ml',
+    'creme 200 G' -> 'Creme 200 g' (a primeira palavra sempre começa maiúscula)."""
+    palavras = formatar_nome(texto).split(" ")
+    return " ".join(p if i == 0 else (p.lower() if p[:1].isdigit() or p.lower() in UNIDADES else p)
+                    for i, p in enumerate(palavras))
 
 
 def normalizar(texto):
@@ -321,6 +337,17 @@ def clientes_sem_pagar(con, hoje, dias_minimos):
     return lista
 
 
+def padronizar_nomes_produtos(con):
+    """Aplica formatar_nome_produto a todos os produtos. Devolve [(antes, depois)] dos que mudaram.
+    O nome_busca não muda (já ignora maiúscula), então não cria nome repetido."""
+    mudancas = [(r["id"], r["nome"], formatar_nome_produto(r["nome"]))
+                for r in con.execute("SELECT id, nome FROM produtos")]
+    mudancas = [m for m in mudancas if m[1] != m[2]]
+    with con:
+        con.executemany("UPDATE produtos SET nome = ? WHERE id = ?", [(depois, i) for i, _, depois in mudancas])
+    return [(antes, depois) for _, antes, depois in mudancas]
+
+
 def saldos(con, apenas_ativos=True):
     where = " WHERE c.ativo = 1" if apenas_ativos else ""
     return con.execute(_SQL_SALDOS + where + " ORDER BY c.nome_busca").fetchall()
@@ -381,7 +408,7 @@ def _limpar_codigo(con, codigo, ignorar_id=None):
 
 
 def criar_produto(con, nome, preco, estoque=0, codigo="", marca="", tipo=""):
-    nome = limpar_nome(nome)
+    nome = formatar_nome_produto(nome)
     if not nome:
         raise ErroDeCadastro("O nome do produto é obrigatório.")
     _checar_nome_livre(con, "produtos", nome)
@@ -395,7 +422,7 @@ def criar_produto(con, nome, preco, estoque=0, codigo="", marca="", tipo=""):
 
 def atualizar_produto(con, produto_id, nome, preco, ativo, estoque=None, codigo=None, marca=None, tipo=None):
     """estoque, codigo, marca e tipo = None mantêm o que está; codigo/marca/tipo = '' apagam."""
-    nome = limpar_nome(nome)
+    nome = formatar_nome_produto(nome)
     if not nome:
         raise ErroDeCadastro("O nome do produto é obrigatório.")
     _checar_nome_livre(con, "produtos", nome, ignorar_id=produto_id)
@@ -417,6 +444,88 @@ def marcas(con):
 def tipos(con):
     """Tipos já usados (perfume, hidratante...), para sugerir e filtrar."""
     return [r[0] for r in con.execute("SELECT DISTINCT tipo FROM produtos WHERE tipo <> '' ORDER BY tipo")]
+
+
+# ---------------------------------------------------------------- produtos repetidos
+
+SEMELHANCA_MINIMA = 0.86        # 0..1: quão parecidos os nomes precisam ser para perguntar
+
+
+def _chave_produto(nome):
+    """'Kaiak  100-ML!' -> 'kaiak 100 ml' (sem acento, maiúscula ou pontuação)."""
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", normalizar(nome)).split())
+
+
+def nomes_parecidos(a, b):
+    """True se dois nomes de produto parecem o mesmo produto digitado de jeitos diferentes.
+
+    Números diferentes nunca são o mesmo ('Batom 01' x 'Batom 02', '50 ml' x '100 ml').
+    """
+    ka, kb = _chave_produto(a), _chave_produto(b)
+    if not ka or not kb or re.findall(r"\d+", ka.replace(" ", "")) != re.findall(r"\d+", kb.replace(" ", "")):
+        return False
+    if ka.replace(" ", "") == kb.replace(" ", "") or sorted(ka.split()) == sorted(kb.split()):
+        return True                                   # só espaço ou ordem das palavras mudou
+    return SequenceMatcher(None, ka, kb).ratio() >= SEMELHANCA_MINIMA
+
+
+def _mesma_marca_possivel(a, b):
+    """Marcas diferentes = produtos diferentes; marca vazia num dos dois não impede."""
+    return not a or not b or normalizar(a) == normalizar(b)
+
+
+def produtos_parecidos(con, nome, marca="", ignorar_id=None):
+    """Produtos já cadastrados que parecem ser este (para o aviso 'não quis dizer...?')."""
+    return [p for p in produtos(con, apenas_ativos=False)
+            if p["id"] != ignorar_id and _mesma_marca_possivel(p["marca"], marca) and nomes_parecidos(p["nome"], nome)]
+
+
+def _pares_ignorados(con):
+    return set(json.loads(ler_meta(con, "produtos_diferentes") or "[]"))
+
+
+def marcar_nao_sao_iguais(con, a_id, b_id):
+    """'Não são o mesmo': o par para de aparecer na lista de possíveis repetidos."""
+    ignorados = _pares_ignorados(con)
+    ignorados.add(f"{min(a_id, b_id)}-{max(a_id, b_id)}")
+    gravar_meta(con, "produtos_diferentes", json.dumps(sorted(ignorados)))
+
+
+def possiveis_repetidos(con):
+    """Pares de produtos cadastrados que parecem o mesmo, menos os marcados como diferentes."""
+    lista, ignorados = produtos(con, apenas_ativos=False), _pares_ignorados(con)
+    pares = []
+    for i, a in enumerate(lista):
+        for b in lista[i + 1:]:
+            if (f"{min(a['id'], b['id'])}-{max(a['id'], b['id'])}" not in ignorados
+                    and _mesma_marca_possivel(a["marca"], b["marca"]) and nomes_parecidos(a["nome"], b["nome"])):
+                pares.append((a, b))
+    return pares
+
+
+def mesclar_produtos(con, manter_id, juntar_id):
+    """Junta o produto `juntar_id` dentro de `manter_id` e apaga o primeiro.
+
+    - as vendas do produto juntado passam a contar no que fica (o histórico não se perde;
+      cada venda continua mostrando o nome com que foi vendida);
+    - os estoques somam;
+    - tipo, marca e código vazios no que fica são preenchidos com os do outro;
+    - nome e preço são os do que fica.
+    """
+    if manter_id == juntar_id:
+        raise ErroDeCadastro("Escolha dois produtos diferentes.")
+    fica, sai = produto(con, manter_id), produto(con, juntar_id)
+    vendas_movidas = con.execute("SELECT COUNT(*) FROM itens_venda WHERE produto_id = ?", (juntar_id,)).fetchone()[0]
+    with con:
+        con.execute("UPDATE itens_venda SET produto_id = ? WHERE produto_id = ?", (manter_id, juntar_id))
+        con.execute("UPDATE produtos SET codigo = NULL WHERE id = ?", (juntar_id,))     # libera o código (único)
+        con.execute("UPDATE produtos SET estoque = estoque + ?, codigo = COALESCE(codigo, ?),"
+                    " marca = CASE WHEN marca = '' THEN ? ELSE marca END,"
+                    " tipo = CASE WHEN tipo = '' THEN ? ELSE tipo END, ativo = MAX(ativo, ?) WHERE id = ?",
+                    (sai["estoque"], sai["codigo"], sai["marca"], sai["tipo"], sai["ativo"], manter_id))
+        con.execute("DELETE FROM produtos WHERE id = ?", (juntar_id,))
+    return dict(nome=fica["nome"], juntado=sai["nome"], vendas_movidas=vendas_movidas,
+                estoque=produto(con, manter_id)["estoque"])
 
 
 def adicionar_estoque(con, produto_id, quantidade):

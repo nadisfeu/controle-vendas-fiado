@@ -954,3 +954,139 @@ def test_sai_sozinho_depois_de_muito_tempo_sem_uso(tmp_path):
     r = http.get("/clientes", follow_redirects=True)
     assert "entre de novo" in r.get_data(as_text=True)
     assert http.get("/clientes").status_code == 302
+
+
+# ---------------------------------------------------------------- produtos repetidos e nome padronizado
+
+@pytest.mark.parametrize("a, b, parecido", [
+    ("Kaiak 100ml", "kaiak 100 ML", True), ("Hidratante Tododia", "Hidrante Tododia", True),
+    ("Essencial Clássico", "Classico Essencial", True), ("Kit Presente", "Kit Presentes", True),
+    ("Batom Matte 01", "Batom Matte 02", False), ("Perfume 50 ml", "Perfume 100 ml", False),
+    ("Sabonete", "Shampoo", False), ("Kaiak", "Kaiak 2", False),
+])
+def test_nomes_parecidos(a, b, parecido):
+    assert db.nomes_parecidos(a, b) is parecido
+
+
+@pytest.mark.parametrize("antes, depois", [
+    ("KAIAK 100ML", "Kaiak 100ml"), ("perfume essencial 100 ML", "Perfume Essencial 100 ml"),
+    ("creme de mãos 200 G", "Creme de Mãos 200 g"), ("KIT presente", "Kit Presente"),
+])
+def test_nome_de_produto_padronizado(con, antes, depois):
+    assert db.formatar_nome_produto(antes) == depois
+    p = db.criar_produto(con, antes, 100)
+    assert db.produto(con, p)["nome"] == depois
+
+
+def test_produtos_ja_cadastrados_sao_padronizados_uma_vez(tmp_path):
+    import sqlite3
+    arq = str(tmp_path / "v.db")
+    db.conectar(arq).close()
+    bruto = sqlite3.connect(arq)       # simula produtos gravados antes da regra
+    bruto.execute("DELETE FROM meta WHERE chave = 'produtos_nomes_padronizados'")
+    bruto.execute("INSERT INTO produtos (nome, nome_busca, preco) VALUES ('KAIAK 100ML', 'kaiak 100ml', 100)")
+    bruto.commit(); bruto.close()
+    con = db.conectar(arq)
+    assert con.execute("SELECT nome FROM produtos").fetchone()[0] == "Kaiak 100ml"
+    con.execute("UPDATE produtos SET nome = 'DE PROPÓSITO'"); con.commit(); con.close()
+    con = db.conectar(arq)               # roda uma vez só: não mexe de novo
+    assert con.execute("SELECT nome FROM produtos").fetchone()[0] == "DE PROPÓSITO"
+    con.close()
+
+
+def test_produtos_parecidos_respeita_marca(con):
+    natura = db.criar_produto(con, "Perfume Floral", 100, marca="Natura")
+    db.criar_produto(con, "Perfume Floral Boti", 100, marca="O Boticário")
+    assert [p["id"] for p in db.produtos_parecidos(con, "perfume floral", marca="natura")] == [natura]
+    assert [p["id"] for p in db.produtos_parecidos(con, "perfume floral", marca="")] == [natura]     # sem marca: pergunta
+    assert db.produtos_parecidos(con, "perfume floral", marca="Eudora") == []                       # marca diferente
+
+
+def test_possiveis_repetidos_e_nao_sao_iguais(con):
+    a = db.criar_produto(con, "Kaiak 100ml", 100)
+    b = db.criar_produto(con, "kaiak 100 ml (2)", 100, codigo="X1")
+    db.criar_produto(con, "Malbec", 100)
+    assert db.nomes_parecidos("Kaiak 100ml", "kaiak 100 ml (2)") is False       # o (2) é número: não é par
+    db.atualizar_produto(con, b, "Kaiak 100 Ml", 100, True)
+    assert [{x["id"], y["id"]} for x, y in db.possiveis_repetidos(con)] == [{a, b}]
+    db.marcar_nao_sao_iguais(con, b, a)
+    assert db.possiveis_repetidos(con) == []
+
+
+def test_mesclar_produtos(con):
+    c = db.criar_cliente(con, "Graça")
+    fica = db.criar_produto(con, "Kaiak 100ml", 15000, estoque=3)
+    sai = db.criar_produto(con, "Kaiak 100 Ml Novo", 14000, estoque=2, codigo="K9", marca="Natura", tipo="Perfume")
+    v = db.registrar_venda(con, c, "2026-11-05", [dict(produto_id=sai, descricao="", quantidade=1, preco_unit=14000)])
+    db.registrar_venda(con, c, "2026-11-06", [dict(produto_id=fica, descricao="", quantidade=2, preco_unit=15000)])
+    r = db.mesclar_produtos(con, fica, sai)
+    p = db.produto(con, fica)
+    assert (p["nome"], p["preco"], p["estoque"]) == ("Kaiak 100ml", 15000, 1 + 1)      # 3-2 + 2-1
+    assert (p["codigo"], p["marca"], p["tipo"]) == ("K9", "Natura", "Perfume")         # vazios preenchidos
+    assert r["vendas_movidas"] == 1
+    with pytest.raises(ErroDeCadastro):
+        db.produto(con, sai)                                                           # o outro sumiu
+    assert db.relatorio_produto(con, fica, 2026)["quantidade"] == 3                    # vendas dos dois juntas
+    assert db.cliente(con, c)["saldo"] == 14000 + 30000                                # saldo do cliente intacto
+    db.cancelar_venda(con, v)                                                          # cancelar venda antiga
+    assert db.produto(con, fica)["estoque"] == 3                                       # devolve no que ficou
+    with pytest.raises(ErroDeCadastro):
+        db.mesclar_produtos(con, fica, fica)
+
+
+def test_aviso_nao_quis_dizer_pelo_site(cliente_http):
+    http, banco = cliente_http
+    http.post("/entrar", data={"senha": "segredo"})
+    http.post("/produtos", data={"nome": "Kaiak 100ml", "preco": "150", "estoque": "3", "marca": "Natura"})
+    r = http.post("/produtos", data={"nome": "KAIAK 100 ML", "preco": "150", "estoque": "2"})
+    pagina = r.get_data(as_text=True)
+    assert r.status_code == 200 and "Não quis dizer este produto?" in pagina and "Kaiak 100ml" in pagina
+    con = db.conectar(banco)
+    assert con.execute("SELECT COUNT(*) FROM produtos").fetchone()[0] == 1               # não criou ainda
+    pid = con.execute("SELECT id FROM produtos").fetchone()[0]
+    r = http.post(f"/produtos/{pid}/somar", data={"estoque": "2"}, follow_redirects=True)
+    assert "Somei 2 ao estoque" in r.get_data(as_text=True) and db.produto(con, pid)["estoque"] == 5
+    r = http.post("/produtos", data={"nome": "KAIAK 100 ML", "preco": "150", "estoque": "2", "confirmar_novo": "1"})
+    assert r.status_code == 302 and con.execute("SELECT COUNT(*) FROM produtos").fetchone()[0] == 2   # "não, é outro"
+    con.close()
+
+
+def test_juntar_e_marcar_diferentes_pelo_site(cliente_http):
+    http, banco = cliente_http
+    http.post("/entrar", data={"senha": "segredo"})
+    con = db.conectar(banco)
+    a = db.criar_produto(con, "Tododia Ameixa", 5000, estoque=1)
+    b = db.criar_produto(con, "Todo Dia Ameixa", 5500, estoque=4)
+    x = db.criar_produto(con, "Malbec Club", 100)
+    y = db.criar_produto(con, "Malbec Clube", 100)
+    con.close()
+    lista = http.get("/produtos").get_data(as_text=True)
+    assert "2 possíveis produtos repetidos" in lista
+    assert http.get(f"/produtos/juntar?a={a}&b={b}").status_code == 200
+    r = http.post("/produtos/juntar", data={"a": a, "b": b, "fica": b}, follow_redirects=True)
+    assert "foi juntado em &#34;Todo Dia Ameixa&#34;" in r.get_data(as_text=True) or \
+           'foi juntado em "Todo Dia Ameixa"' in r.get_data(as_text=True)
+    con = db.conectar(banco)
+    assert db.produto(con, b)["estoque"] == 5 and db.produto(con, b)["preco"] == 5500
+    con.close()
+    http.post("/produtos/diferentes", data={"a": x, "b": y})
+    assert "possíve" not in http.get("/produtos").get_data(as_text=True)
+    assert http.get("/produtos/juntar?a=1&b=999").status_code == 404
+
+
+
+def test_juntar_sugere_o_mais_vendido_ou_o_mais_antigo(cliente_http):
+    import re
+    http, banco = cliente_http
+    http.post("/entrar", data={"senha": "segredo"})
+    con = db.conectar(banco)
+    original = db.criar_produto(con, "Quasar Classic", 9000)
+    errado = db.criar_produto(con, "Quasar Clasic", 9000)
+    con.close()
+    marcado = lambda: re.search(r'name="fica" value="(\d+)" checked', http.get(f"/produtos/juntar?a={errado}&b={original}").get_data(as_text=True)).group(1)
+    assert marcado() == str(original)                                  # empate em vendas: o cadastrado primeiro
+    con = db.conectar(banco)
+    c = db.criar_cliente(con, "Iva")
+    db.registrar_venda(con, c, "2026-11-01", [dict(produto_id=errado, descricao="", quantidade=3, preco_unit=9000)])
+    con.close()
+    assert marcado() == str(errado)                                    # o que mais vendeu

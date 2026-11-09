@@ -374,6 +374,7 @@ def test_graficos_de_relatorios(pagina, site):
     # toque num quadradinho do mapa (março, dia 5) mostra o valor e continua aparecendo
     celula = pg.locator(".mapa .celula[data-dica^='5 de março']")
     celula.scroll_into_view_if_needed()
+    pg.mouse.move(1, 1)          # tira o mouse de cima: parado, ele "acenderia" o quadradinho que rolar para baixo dele
     celula.dispatch_event("pointerover", {"pointerType": "touch"})
     celula.dispatch_event("pointerout", {"pointerType": "touch"})
     assert pg.inner_text(".dica-grafico") == "5 de março (qui): R$ 80,00 · 1 venda"
@@ -458,3 +459,41 @@ def test_filtros_de_produto_e_busca_por_codigo(pagina, site):
     nomes = [t.split("\n")[0] for t in pg.locator("button.produto").all_inner_texts()]
     assert nomes == ["Tododia Ameixa"]                                           # desativado não aparece na venda
     assert "Hidratante · Natura" in pg.locator("button.produto").first.inner_text()
+
+
+def test_produto_repetido_aviso_e_juntar(pagina, site):
+    url, banco = site
+    pg = pagina
+    pg.goto(url + "/produtos")
+    for campo, valor in [("nome", "Egeo Dolce 90ml"), ("preco", "120"), ("estoque", "2")]:
+        pg.fill(f".form-produto input[name={campo}]", valor)
+    pg.click(".form-produto button[type=submit]")
+    for campo, valor in [("nome", "EGEO DOLCE 90 ML"), ("preco", "120"), ("estoque", "3")]:   # repetido por engano
+        pg.fill(f".form-produto input[name={campo}]", valor)
+    pg.click(".form-produto button[type=submit]")
+    assert "Não quis dizer este produto?" in pg.inner_text("#aviso-parecido")
+    sem_rolagem_lateral(pg)
+    foto(pg, "15_nao_quis_dizer")
+    pg.click("#aviso-parecido button:has-text('Sim, é esse')")
+    assert "Somei 3 ao estoque" in pg.inner_text(".aviso")
+    con = db.conectar(banco)
+    egeo = con.execute("SELECT id, estoque FROM produtos WHERE nome = 'Egeo Dolce 90ml'").fetchall()
+    assert len(egeo) == 1 and egeo[0]["estoque"] == 5
+    # um par que já estava repetido aparece na lista e é juntado
+    a = db.criar_produto(con, "Quasar Classic", 9000, estoque=1)
+    b = db.criar_produto(con, "Quasar Clasic", 9000, estoque=2, codigo="QC1")
+    con.close()
+    pg.goto(url + "/produtos")
+    par = pg.locator(".par-repetido:has-text('Quasar')")
+    assert par.count() == 1
+    par.locator("a:has-text('Juntar')").click()
+    sem_rolagem_lateral(pg)
+    foto(pg, "16_juntar")
+    pg.check(f"input[name=fica][value='{a}']")
+    pg.once("dialog", lambda d: d.accept())
+    pg.click("button:has-text('Juntar os dois')")
+    assert "foi juntado em" in pg.inner_text(".aviso")
+    assert "cód. QC1" in pg.inner_text("main")                     # código do outro veio junto
+    con = db.conectar(banco)
+    assert db.produto(con, a)["estoque"] == 3
+    con.close()

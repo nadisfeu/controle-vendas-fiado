@@ -29,6 +29,8 @@ mês novo, e muito trabalho manual.
   telefone para ligar — usando também o histórico de pagamentos da planilha antiga, mês a mês desde 2023.
 - **Produtos** com preço, estoque e, opcionalmente, **tipo, marca e código** — busca por qualquer um deles e
   filtros por tipo, marca, estoque e situação. A venda desconta do estoque, cancelar devolve.
+  Produto parecido com um já cadastrado gera o aviso "não quis dizer...?", e os repetidos que já existem
+  podem ser **juntados** (estoque somado, vendas unidas). Nomes padronizados ("KAIAK 100ML" → "Kaiak 100ml").
 - **Nova venda** na tela do cliente: toca nos produtos, ajusta a quantidade, dá **desconto** no item
   ("o perfume é 200, saiu por 170") e vê o saldo depois da venda antes de salvar.
 - **Pagamentos** com o botão "pagou tudo"; quem paga a mais fica com crédito.
@@ -72,7 +74,7 @@ mês novo, e muito trabalho manual.
 
 ## Testes
 
-128 testes: regras de saldo, dinheiro, estoque, desconto, importação, impressão, gráficos, filtros — e testes num
+152 testes: regras de saldo, dinheiro, estoque, desconto, importação, impressão, gráficos, filtros — e testes num
 navegador de verdade (Chromium via Playwright) que clicam pelas telas em tamanho de celular,
 conferem que não há erro de JavaScript e que nenhuma tela passa da largura do celular.
 As cores têm contraste conferido (4,5:1 ou mais) nos dois temas.

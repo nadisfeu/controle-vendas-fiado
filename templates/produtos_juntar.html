@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block titulo %}Juntar produtos{% endblock %}
+{% block conteudo %}
+<a class="voltar" href="{{ url_for('produtos') }}">← Produtos</a>
+<h1>Juntar produtos repetidos</h1>
+<p>Escolha <b>qual dos dois fica</b>: o nome e o preço dele são mantidos. O outro deixa de existir, e:</p>
+<ul>
+  <li>o <b>estoque</b> dos dois é somado ({{ a.estoque }} + {{ b.estoque }} = <b>{{ a.estoque + b.estoque }}</b>);</li>
+  <li>as <b>vendas</b> do outro passam a contar neste (o histórico dos clientes não muda);</li>
+  <li>tipo, marca e código que estiverem vazios são preenchidos com os do outro.</li>
+</ul>
+
+<form method="post" class="cartao formulario">
+  <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+  <input type="hidden" name="a" value="{{ a.id }}"><input type="hidden" name="b" value="{{ b.id }}">
+  {% for p in (a, b) %}
+  <label class="opcao-juntar">
+    <input type="radio" name="fica" value="{{ p.id }}" {{ 'checked' if p.id == sugerido }}>
+    <span class="produto-nome">
+      <b>Fica "{{ p.nome }}"</b>
+      {% set extra = [p.tipo, p.marca, ('cód. ' ~ p.codigo) if p.codigo else ''] | select | join(' · ') %}
+      <small class="produto-extra">{{ extra }}{{ ' · ' if extra }}{{ p.preco|reais }} · {{ p.estoque }} em estoque ·
+        {{ vendidos[p.id] }} vendido{{ 's' if vendidos[p.id] != 1 }}{% if not p.ativo %} · desativado{% endif %}</small>
+    </span>
+  </label>
+  {% endfor %}
+  <button class="botao botao-principal" type="submit"
+          onclick="return confirm('Juntar os dois produtos? Isso não pode ser desfeito.')">Juntar os dois</button>
+  <a class="botao" href="{{ url_for('produtos') }}">Cancelar</a>
+</form>
+{% endblock %}

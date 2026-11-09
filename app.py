@@ -388,17 +388,77 @@ def criar_app(banco, senha, chave, cookie_seguro=False, csrf=True, pasta_copias=
     @login_obrigatorio
     def produtos():
         f = request.form
+        sugestoes = []
         if request.method == "POST":
             try:
-                db.criar_produto(con(), f.get("nome", ""), db.reais_para_centavos(f.get("preco", "")),
-                                 db.ler_quantidade(f.get("estoque")), f.get("codigo", ""), f.get("marca", ""),
-                                 f.get("tipo", ""))
-                flash(f'Produto "{db.limpar_nome(f["nome"])}" cadastrado.')
-                return redirect(url_for("produtos"))
+                preco, estoque = db.reais_para_centavos(f.get("preco", "")), db.ler_quantidade(f.get("estoque"))
+                # parece com um que já existe? pergunta antes de criar outro ("não quis dizer...?")
+                if f.get("confirmar_novo") != "1":
+                    sugestoes = db.produtos_parecidos(con(), f.get("nome", ""), f.get("marca", ""))
+                if not sugestoes:
+                    db.criar_produto(con(), f.get("nome", ""), preco, estoque, f.get("codigo", ""), f.get("marca", ""),
+                                     f.get("tipo", ""))
+                    flash(f'Produto "{db.formatar_nome_produto(f["nome"])}" cadastrado.')
+                    return redirect(url_for("produtos"))
             except ErroDeCadastro as e:
                 flash(str(e), "erro")
         return render_template("produtos.html", produtos=db.produtos(con(), apenas_ativos=False), form=f,
-                               marcas=db.marcas(con()), tipos=db.tipos(con()))
+                               marcas=db.marcas(con()), tipos=db.tipos(con()), sugestoes=sugestoes,
+                               repetidos=db.possiveis_repetidos(con()))
+
+    @app.route("/produtos/<int:produto_id>/somar", methods=["POST"])
+    @login_obrigatorio
+    def produto_somar(produto_id):
+        """'Sim, é esse': em vez de cadastrar de novo, soma a quantidade digitada ao produto que já existe."""
+        try:
+            quantidade = db.ler_quantidade(request.form.get("estoque"))
+            p = db.produto(con(), produto_id)
+            if quantidade:
+                db.adicionar_estoque(con(), produto_id, quantidade)
+                flash(f'Não cadastrei de novo: "{p["nome"]}" já existia. Somei {quantidade} ao estoque dele.')
+            else:
+                flash(f'Não cadastrei de novo: "{p["nome"]}" já existia.')
+        except ErroDeCadastro as e:
+            flash(str(e), "erro")
+            return redirect(url_for("produtos"))
+        return redirect(url_for("produto_ver", produto_id=produto_id))
+
+    @app.route("/produtos/juntar", methods=["GET", "POST"])
+    @login_obrigatorio
+    def produtos_juntar():
+        try:
+            a, b = int(request.values.get("a", "")), int(request.values.get("b", ""))
+            pa, pb = db.produto(con(), a), db.produto(con(), b)
+        except (ValueError, ErroDeCadastro):
+            abort(404)
+        if request.method == "POST":
+            fica = int(request.form.get("fica", 0))
+            if fica not in (a, b):
+                flash("Escolha qual dos dois produtos fica.", "erro")
+            else:
+                try:
+                    r = db.mesclar_produtos(con(), fica, b if fica == a else a)
+                    flash(f'Pronto: "{r["juntado"]}" foi juntado em "{r["nome"]}". '
+                          f'Estoque agora: {r["estoque"]}. Vendas passadas para ele: {r["vendas_movidas"]}.')
+                    return redirect(url_for("produto_ver", produto_id=fica))
+                except ErroDeCadastro as e:
+                    flash(str(e), "erro")
+        vendidos = {pid: con().execute("SELECT COALESCE(SUM(quantidade), 0) FROM itens_venda i JOIN vendas v"
+                                       " ON v.id = i.venda_id WHERE i.produto_id = ? AND v.cancelada_em IS NULL",
+                                       (pid,)).fetchone()[0] for pid in (a, b)}
+        # sugere manter o mais vendido; no empate, o cadastrado primeiro (costuma ser o original)
+        sugerido = max((pa, pb), key=lambda p: (vendidos[p["id"]], -p["id"]))["id"]
+        return render_template("produtos_juntar.html", a=pa, b=pb, vendidos=vendidos, sugerido=sugerido)
+
+    @app.route("/produtos/diferentes", methods=["POST"])
+    @login_obrigatorio
+    def produtos_diferentes():
+        try:
+            db.marcar_nao_sao_iguais(con(), int(request.form["a"]), int(request.form["b"]))
+            flash("Certo, esses dois não vão mais aparecer como repetidos.")
+        except (KeyError, ValueError):
+            abort(400)
+        return redirect(url_for("produtos"))
 
     @app.route("/produtos/<int:produto_id>")
     @login_obrigatorio

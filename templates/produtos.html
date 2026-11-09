@@ -10,11 +10,66 @@
   <p>Para achar um produto, digite parte do <b>nome, do código, do tipo ou da marca</b>. Dá para filtrar também por
   tipo, por marca, por estoque e por produtos desativados.</p>
   <p>Toque num produto para ver <b>quanto ele vendeu</b> mês a mês, quem mais comprou, e para editar.</p>
+  <p><b>Produto repetido:</b> se você cadastrar um produto com nome parecido com um que já existe, o sistema pergunta
+  "Não quis dizer...?". Se dois já estiverem cadastrados repetidos, eles aparecem em <b>"Possíveis produtos repetidos"</b>:
+  toque em <b>Juntar</b> para virar um só (estoque somado, vendas juntas) ou em <b>Não são o mesmo</b>.
+  Os nomes ficam padronizados sozinhos: "KAIAK 100ML" vira "Kaiak 100ml".</p>
   <p><b>Estoque:</b> cada venda desconta sozinha; cancelar a venda devolve. Chegou mercadoria? Toque no produto
   e use <b>"Chegou mercadoria"</b> para somar.</p>
   <p>Mudou o preço? Edite o produto: <b>as vendas antigas continuam com o preço da época</b>.
   Parou de vender? Desmarque "ativo": ele some da tela de venda, mas o histórico fica.</p>
 </details>
+
+{% if sugestoes %}
+<section class="cartao aviso-parecido" id="aviso-parecido">
+  <h2>Não quis dizer {% if sugestoes|length == 1 %}este produto{% else %}um destes produtos{% endif %}?</h2>
+  <p>Você está cadastrando <b>"{{ form.get('nome') }}"</b>, mas já existe um produto parecido. Se for o mesmo,
+    toque em <b>Sim</b>: ele não é cadastrado de novo{% if form.get('estoque') %} e as {{ form.get('estoque') }}
+    unidades são somadas ao estoque dele{% endif %}.</p>
+  {% for s in sugestoes %}
+  <div class="parecido">
+    <span class="produto-nome"><b>{{ s.nome }}</b>
+      {% set extra = [s.tipo, s.marca, ('cód. ' ~ s.codigo) if s.codigo else ''] | select | join(' · ') %}
+      <small class="produto-extra">{{ extra }}{{ ' · ' if extra }}{{ s.preco|reais }} · {{ s.estoque }} em estoque{% if not s.ativo %} · desativado{% endif %}</small>
+    </span>
+    <form method="post" action="{{ url_for('produto_somar', produto_id=s.id) }}">
+      <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+      <input type="hidden" name="estoque" value="{{ form.get('estoque', '') }}">
+      <button class="botao botao-principal" type="submit">Sim, é esse</button>
+    </form>
+  </div>
+  {% endfor %}
+  <form method="post" class="nao-e-esse">
+    <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+    {% for campo in ('tipo', 'marca', 'nome', 'codigo', 'preco', 'estoque') %}<input type="hidden" name="{{ campo }}" value="{{ form.get(campo, '') }}">{% endfor %}
+    <input type="hidden" name="confirmar_novo" value="1">
+    <button class="botao" type="submit">Não, é outro produto: cadastrar "{{ form.get('nome') }}"</button>
+  </form>
+</section>
+{% endif %}
+
+{% if repetidos %}
+<details class="cartao repetidos" {{ 'open' if not sugestoes }}>
+  <summary><b>⚠ {{ repetidos|length }} possíve{{ 'is' if repetidos|length > 1 else 'l' }} produto{{ 's' if repetidos|length > 1 }} repetido{{ 's' if repetidos|length > 1 }}</b>
+    <small>— nomes muito parecidos; confira se é o mesmo produto cadastrado duas vezes</small></summary>
+  <ul class="lista">
+    {% for a, b in repetidos %}
+    <li class="par-repetido">
+      <span class="produto-nome"><span><b>{{ a.nome }}</b> <small>({{ a.estoque }} em estoque)</small></span>
+        <span><b>{{ b.nome }}</b> <small>({{ b.estoque }} em estoque)</small></span></span>
+      <span class="par-acoes">
+        <a class="botao botao-principal" href="{{ url_for('produtos_juntar', a=a.id, b=b.id) }}">Juntar</a>
+        <form method="post" action="{{ url_for('produtos_diferentes') }}">
+          <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+          <input type="hidden" name="a" value="{{ a.id }}"><input type="hidden" name="b" value="{{ b.id }}">
+          <button class="botao" type="submit">Não são o mesmo</button>
+        </form>
+      </span>
+    </li>
+    {% endfor %}
+  </ul>
+</details>
+{% endif %}
 
 <form method="post" class="cartao formulario em-linha form-produto">
   <input type="hidden" name="csrf" value="{{ csrf_token() }}">
