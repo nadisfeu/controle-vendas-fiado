@@ -1106,7 +1106,7 @@ def test_padronizacao_v2_conserta_tamanhos_de_quem_rodou_a_v1(tmp_path):
     arq = str(tmp_path / "v.db")
     db.conectar(arq).close()
     bruto = sqlite3.connect(arq)
-    bruto.execute("DELETE FROM meta WHERE chave = 'produtos_nomes_padronizados_v2'")
+    bruto.execute("DELETE FROM meta WHERE chave LIKE 'produtos_nomes_padronizados%'")
     bruto.execute("INSERT OR REPLACE INTO meta (chave, valor) VALUES ('produtos_nomes_padronizados', '2026-11-09')")
     bruto.executemany("INSERT INTO produtos (nome, nome_busca, preco) VALUES (?, ?, 100)",
                       [("Camiseta g", "camiseta g"), ("Camiseta Gg", "camiseta gg"), ("Creme 200 g", "creme 200 g")])
@@ -1115,3 +1115,54 @@ def test_padronizacao_v2_conserta_tamanhos_de_quem_rodou_a_v1(tmp_path):
     assert sorted(r[0] for r in con.execute("SELECT nome FROM produtos")) == ["Camiseta G", "Camiseta GG", "Creme 200 g"]
     assert db.possiveis_repetidos(con) == []                       # G e GG não são o mesmo produto
     con.close()
+
+
+
+# ---------------------------------------------------------------- ordem do nome: produto, gênero, tamanho, cor
+
+@pytest.mark.parametrize("antes, depois", [
+    ("gg camisa regata masculina azul", "Camisa Regata Masculina GG Azul"),
+    ("calça jeans 38 feminina", "Calça Jeans Feminina 38"),
+    ("m blusa infantil rosa", "Blusa Infantil M Rosa"),
+    ("camisa de algodão gg masculina", "Camisa de Algodão Masculina GG"),
+    ("tenis 37 feminino branco", "Tenis Feminino 37 Branco"),
+    ("perfume infantil 100ml floral", "Perfume Floral Infantil 100ml"),
+    # sem gênero nem tamanho: não mexe na ordem
+    ("perfume floral 100 ml", "Perfume Floral 100 ml"), ("Rosa Mosqueta Óleo", "Rosa Mosqueta Óleo"),
+    ("Kit 3 Sabonetes", "Kit 3 Sabonetes"), ("Batom 01 Vermelho", "Batom 01 Vermelho"),
+])
+def test_organiza_nome_de_roupa(antes, depois):
+    assert db.formatar_nome_produto(antes) == depois
+    assert db.formatar_nome_produto(depois) == depois                     # aplicar de novo não muda nada
+
+
+def test_organizar_produtos_existentes_com_copia_e_sem_criar_repetido(tmp_path):
+    import sqlite3
+    arq = tmp_path / "v.db"
+    db.conectar(str(arq)).close()
+    bruto = sqlite3.connect(arq)
+    bruto.execute("DELETE FROM meta WHERE chave LIKE 'produtos_nomes_padronizados%'")
+    bruto.executemany("INSERT INTO produtos (nome, nome_busca, preco) VALUES (?, ?, 100)", [
+        ("GG Camisa Regata", "gg camisa regata"),            # vira "Camisa Regata GG"...
+        ("Camisa Regata GG", "camisa regata gg"),            # ...que já existe: o de cima fica como está
+        ("Calça 38 Feminina", "calca 38 feminina"),
+    ])
+    bruto.commit(); bruto.close()
+    con = db.conectar(str(arq))
+    nomes = sorted(r[0] for r in con.execute("SELECT nome FROM produtos"))
+    assert nomes == ["Calça Feminina 38", "Camisa Regata GG", "GG Camisa Regata"]
+    assert con.execute("SELECT nome_busca FROM produtos WHERE nome = 'Calça Feminina 38'").fetchone()[0] == "calca feminina 38"
+    assert len(db.possiveis_repetidos(con)) == 1                           # o par fica para juntar
+    copias = list((tmp_path / "backups").glob("antes_organizar_nomes_produtos_*.db"))
+    assert len(copias) == 1                                                # cópia antes da mudança em massa
+    antiga = sqlite3.connect(copias[0])
+    assert ("Calça 38 Feminina",) in antiga.execute("SELECT nome FROM produtos").fetchall()
+    antiga.close()
+    with pytest.raises(ErroDeCadastro, match="Já existe"):
+        db.criar_produto(con, "feminina calça 38", 100)                    # nome_busca novo vale para repetidos
+    con.close()
+
+
+def test_banco_sem_produtos_nao_faz_copia(tmp_path):
+    db.conectar(str(tmp_path / "vazio.db")).close()
+    assert not (tmp_path / "backups").exists()

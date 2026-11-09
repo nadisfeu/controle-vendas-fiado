@@ -114,9 +114,11 @@ def _atualizar_banco_antigo(con):
         with con:
             con.execute("ALTER TABLE produtos ADD COLUMN tipo TEXT NOT NULL DEFAULT ''")
     con.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_produtos_codigo ON produtos(upper(codigo)) WHERE codigo IS NOT NULL")
-    if not ler_meta(con, "produtos_nomes_padronizados_v2"):     # v2: tamanhos P/M/G/GG em maiúsculo
+    if not ler_meta(con, "produtos_nomes_padronizados_v3"):     # v3: ordem nome, gênero, tamanho, cor
+        if con.execute("SELECT 1 FROM produtos LIMIT 1").fetchone():
+            _copia_antes_de_mudar(con, "organizar_nomes_produtos")
         padronizar_nomes_produtos(con)
-        gravar_meta(con, "produtos_nomes_padronizados_v2", date.today().isoformat())
+        gravar_meta(con, "produtos_nomes_padronizados_v3", date.today().isoformat())
     colunas = {r["name"] for r in con.execute("PRAGMA table_info(clientes)")}
     if "ultimo_pagamento_planilha" not in colunas:
         with con:
@@ -194,7 +196,52 @@ def formatar_nome_produto(texto):
         elif p.lower() in TAMANHOS:
             p = p.upper()
         saida.append(p)
-    return " ".join(saida)
+    return organizar_nome_produto(" ".join(saida))
+
+
+GENEROS = {"masculino", "masculina", "feminino", "feminina", "infantil", "unissex", "menino", "menina",
+           "adulto", "adulta", "juvenil", "masc", "fem", "bebe", "baby"}
+CORES = {"azul", "preto", "preta", "branco", "branca", "vermelho", "vermelha", "verde", "amarelo", "amarela",
+         "rosa", "roxo", "roxa", "lilas", "cinza", "marrom", "bege", "laranja", "dourado", "dourada", "prata",
+         "prateado", "prateada", "nude", "vinho", "caramelo", "estampado", "estampada", "colorido", "colorida"}
+
+
+def organizar_nome_produto(nome):
+    """Ordem fixa para roupa: nome do produto, gênero, tamanho, depois cor e medidas.
+
+    'Camisa GG Regata Masculina Azul' -> 'Camisa Regata Masculina GG Azul';
+    'Calça Jeans 38 Feminina' -> 'Calça Jeans Feminina 38'.
+    Só mexe em nome que tenha gênero ou tamanho (P, M, G...): cosmético e o resto ficam como estão
+    ('Rosa Mosqueta Óleo', 'Kit 3 Sabonetes'). As palavras do nome mantêm a ordem em que foram digitadas.
+    """
+    palavras = nome.split(" ")
+    chaves = [normalizar(p) for p in palavras]
+    if not any(c in GENEROS or c in TAMANHOS for c in chaves):
+        return nome
+
+    def e_extra(i):          # gênero, tamanho ou cor: o que pode sair do meio do nome
+        return chaves[i] in GENEROS or chaves[i] in TAMANHOS or chaves[i] in CORES
+
+    produto, genero, tamanho, outros = [], [], [], []
+    for i, (p, c) in enumerate(zip(palavras, chaves)):
+        seguinte_e_unidade = i + 1 < len(chaves) and chaves[i + 1] in UNIDADES
+        if c in GENEROS:
+            genero.append(p)
+        elif c in TAMANHOS and not (i > 0 and chaves[i - 1][:1].isdigit()):
+            tamanho.append(p)
+        elif c in CORES:
+            outros.append(p)
+        elif re.fullmatch(r"\d+[a-z]+", c) or (c.isdigit() and seguinte_e_unidade) or (
+                c in UNIDADES and i > 0 and chaves[i - 1].isdigit()):
+            outros.append(p)                               # medida: '100ml', '200 g'
+        elif c.isdigit() and all(e_extra(j) for j in range(i + 1, len(chaves))):
+            tamanho.append(p)                              # número no fim: tamanho ('Calça Jeans 38')
+        else:
+            produto.append(p)
+    if not produto:                                        # só gênero/tamanho/cor: não tem o que reorganizar
+        return nome
+    novo = " ".join(produto + genero + tamanho + outros)
+    return novo[:1].upper() + novo[1:]
 
 
 def normalizar(texto):
@@ -352,13 +399,33 @@ def clientes_sem_pagar(con, hoje, dias_minimos):
 
 def padronizar_nomes_produtos(con):
     """Aplica formatar_nome_produto a todos os produtos. Devolve [(antes, depois)] dos que mudaram.
-    O nome_busca não muda (já ignora maiúscula), então não cria nome repetido."""
-    mudancas = [(r["id"], r["nome"], formatar_nome_produto(r["nome"]))
-                for r in con.execute("SELECT id, nome FROM produtos")]
-    mudancas = [m for m in mudancas if m[1] != m[2]]
+
+    Reorganizar pode mudar o nome_busca: se o nome novo já for de outro produto, este fica como está
+    (não cria nome repetido; o par aparece em 'possíveis produtos repetidos')."""
+    linhas = con.execute("SELECT id, nome FROM produtos ORDER BY id").fetchall()
+    em_uso = {normalizar(r["nome"]): r["id"] for r in linhas}
+    mudancas = []
+    for r in linhas:
+        novo = formatar_nome_produto(r["nome"])
+        if novo == r["nome"]:
+            continue
+        dono = em_uso.get(normalizar(novo))
+        if dono is not None and dono != r["id"]:
+            continue
+        em_uso.pop(normalizar(r["nome"]), None)
+        em_uso[normalizar(novo)] = r["id"]
+        mudancas.append((r["id"], r["nome"], novo))
     with con:
-        con.executemany("UPDATE produtos SET nome = ? WHERE id = ?", [(depois, i) for i, _, depois in mudancas])
+        con.executemany("UPDATE produtos SET nome = ?, nome_busca = ? WHERE id = ?",
+                        [(depois, normalizar(depois), i) for i, _, depois in mudancas])
     return [(antes, depois) for _, antes, depois in mudancas]
+
+
+def _copia_antes_de_mudar(con, motivo):
+    """Cópia do banco ao lado dele (backups/) antes de uma mudança em massa feita sozinha."""
+    arquivo = con.execute("PRAGMA database_list").fetchone()["file"]
+    if arquivo:
+        copiar_banco(con, Path(arquivo).parent / "backups" / f"antes_{motivo}_{date.today().isoformat()}.db")
 
 
 def saldos(con, apenas_ativos=True):
