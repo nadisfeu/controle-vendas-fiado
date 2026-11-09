@@ -482,7 +482,12 @@ def nomes_parecidos(a, b):
         return False                                  # tamanhos diferentes: 'Camiseta G' x 'Camiseta GG' 
     if ka.replace(" ", "") == kb.replace(" ", "") or sorted(ka.split()) == sorted(kb.split()):
         return True                                   # só espaço ou ordem das palavras mudou
-    return SequenceMatcher(None, ka, kb).ratio() >= SEMELHANCA_MINIMA
+    if SequenceMatcher(None, ka, kb).ratio() >= SEMELHANCA_MINIMA:
+        return True
+    # ordem diferente + erro de digitação ('camisa regata gg' x 'gg camiza regata'): compara as palavras
+    # em ordem alfabética, só com o mesmo número de palavras (uma palavra a mais, como uma cor, é outro produto)
+    pa, pb = sorted(ka.split()), sorted(kb.split())
+    return len(pa) == len(pb) and SequenceMatcher(None, " ".join(pa), " ".join(pb)).ratio() >= SEMELHANCA_MINIMA
 
 
 def _mesma_marca_possivel(a, b):

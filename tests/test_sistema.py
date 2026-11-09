@@ -965,6 +965,9 @@ def test_sai_sozinho_depois_de_muito_tempo_sem_uso(tmp_path):
     ("Sabonete", "Shampoo", False), ("Kaiak", "Kaiak 2", False),
     ("Camiseta G", "Camiseta GG", False), ("Camiseta M", "Camiseta G", False), ("Blusa P", "Blusa PP", False),
     ("Camiseta G", "camiseta g", True),
+    ("camisa regata gg", "gg camisa regata", True), ("camisa regata gg", "GG  Camisa   Regata", True),
+    ("camisa regata gg", "regata camisa gg", True), ("camisa regata gg", "gg camiza regata", True),
+    ("camisa regata gg", "gg camisa regata azul", False), ("camisa regata gg", "g camisa regata", False),
 ])
 def test_nomes_parecidos(a, b, parecido):
     assert db.nomes_parecidos(a, b) is parecido
