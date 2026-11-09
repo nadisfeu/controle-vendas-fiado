@@ -963,6 +963,8 @@ def test_sai_sozinho_depois_de_muito_tempo_sem_uso(tmp_path):
     ("Essencial Clássico", "Classico Essencial", True), ("Kit Presente", "Kit Presentes", True),
     ("Batom Matte 01", "Batom Matte 02", False), ("Perfume 50 ml", "Perfume 100 ml", False),
     ("Sabonete", "Shampoo", False), ("Kaiak", "Kaiak 2", False),
+    ("Camiseta G", "Camiseta GG", False), ("Camiseta M", "Camiseta G", False), ("Blusa P", "Blusa PP", False),
+    ("Camiseta G", "camiseta g", True),
 ])
 def test_nomes_parecidos(a, b, parecido):
     assert db.nomes_parecidos(a, b) is parecido
@@ -971,6 +973,8 @@ def test_nomes_parecidos(a, b, parecido):
 @pytest.mark.parametrize("antes, depois", [
     ("KAIAK 100ML", "Kaiak 100ml"), ("perfume essencial 100 ML", "Perfume Essencial 100 ml"),
     ("creme de mãos 200 G", "Creme de Mãos 200 g"), ("KIT presente", "Kit Presente"),
+    ("camiseta g", "Camiseta G"), ("CAMISETA GG", "Camiseta GG"), ("calça m", "Calça M"),
+    ("vestido pp azul", "Vestido PP Azul"), ("fita 2 M", "Fita 2 m"),
 ])
 def test_nome_de_produto_padronizado(con, antes, depois):
     assert db.formatar_nome_produto(antes) == depois
@@ -983,7 +987,7 @@ def test_produtos_ja_cadastrados_sao_padronizados_uma_vez(tmp_path):
     arq = str(tmp_path / "v.db")
     db.conectar(arq).close()
     bruto = sqlite3.connect(arq)       # simula produtos gravados antes da regra
-    bruto.execute("DELETE FROM meta WHERE chave = 'produtos_nomes_padronizados'")
+    bruto.execute("DELETE FROM meta WHERE chave LIKE 'produtos_nomes_padronizados%'")
     bruto.execute("INSERT INTO produtos (nome, nome_busca, preco) VALUES ('KAIAK 100ML', 'kaiak 100ml', 100)")
     bruto.commit(); bruto.close()
     con = db.conectar(arq)
@@ -1090,3 +1094,21 @@ def test_juntar_sugere_o_mais_vendido_ou_o_mais_antigo(cliente_http):
     db.registrar_venda(con, c, "2026-11-01", [dict(produto_id=errado, descricao="", quantidade=3, preco_unit=9000)])
     con.close()
     assert marcado() == str(errado)                                    # o que mais vendeu
+
+
+
+def test_padronizacao_v2_conserta_tamanhos_de_quem_rodou_a_v1(tmp_path):
+    """A primeira versão transformava 'Camiseta G' em 'Camiseta g' e 'GG' em 'Gg': a v2 roda de novo e conserta."""
+    import sqlite3
+    arq = str(tmp_path / "v.db")
+    db.conectar(arq).close()
+    bruto = sqlite3.connect(arq)
+    bruto.execute("DELETE FROM meta WHERE chave = 'produtos_nomes_padronizados_v2'")
+    bruto.execute("INSERT OR REPLACE INTO meta (chave, valor) VALUES ('produtos_nomes_padronizados', '2026-11-09')")
+    bruto.executemany("INSERT INTO produtos (nome, nome_busca, preco) VALUES (?, ?, 100)",
+                      [("Camiseta g", "camiseta g"), ("Camiseta Gg", "camiseta gg"), ("Creme 200 g", "creme 200 g")])
+    bruto.commit(); bruto.close()
+    con = db.conectar(arq)
+    assert sorted(r[0] for r in con.execute("SELECT nome FROM produtos")) == ["Camiseta G", "Camiseta GG", "Creme 200 g"]
+    assert db.possiveis_repetidos(con) == []                       # G e GG não são o mesmo produto
+    con.close()

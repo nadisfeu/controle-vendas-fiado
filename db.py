@@ -114,9 +114,9 @@ def _atualizar_banco_antigo(con):
         with con:
             con.execute("ALTER TABLE produtos ADD COLUMN tipo TEXT NOT NULL DEFAULT ''")
     con.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_produtos_codigo ON produtos(upper(codigo)) WHERE codigo IS NOT NULL")
-    if not ler_meta(con, "produtos_nomes_padronizados"):
+    if not ler_meta(con, "produtos_nomes_padronizados_v2"):     # v2: tamanhos P/M/G/GG em maiúsculo
         padronizar_nomes_produtos(con)
-        gravar_meta(con, "produtos_nomes_padronizados", date.today().isoformat())
+        gravar_meta(con, "produtos_nomes_padronizados_v2", date.today().isoformat())
     colunas = {r["name"] for r in con.execute("PRAGMA table_info(clientes)")}
     if "ultimo_pagamento_planilha" not in colunas:
         with con:
@@ -174,14 +174,27 @@ def formatar_nome(texto):
 
 
 UNIDADES = {"ml", "l", "g", "kg", "mg", "cm", "mm", "m", "un", "und", "pct", "cx"}
+# tamanhos de roupa/calçado: sozinhos (sem número antes) são tamanho, não unidade ("Camiseta G" x "200 g")
+TAMANHOS = {"pp", "p", "m", "g", "gg", "xg", "xgg", "xxg", "eg", "egg", "exg", "u"}
 
 
 def formatar_nome_produto(texto):
-    """Como formatar_nome, mas unidades e números ficam em minúsculo: 'KAIAK 100ML' -> 'Kaiak 100ml',
-    'creme 200 G' -> 'Creme 200 g' (a primeira palavra sempre começa maiúscula)."""
+    """Como formatar_nome, com três ajustes (a primeira palavra sempre começa maiúscula):
+    - número com unidade grudada fica minúsculo: 'KAIAK 100ML' -> 'Kaiak 100ml';
+    - unidade logo depois de um número fica minúscula: 'creme 200 G' -> 'Creme 200 g';
+    - tamanho sozinho fica maiúsculo: 'camiseta gg' -> 'Camiseta GG', 'calça m' -> 'Calça M'."""
     palavras = formatar_nome(texto).split(" ")
-    return " ".join(p if i == 0 else (p.lower() if p[:1].isdigit() or p.lower() in UNIDADES else p)
-                    for i, p in enumerate(palavras))
+    saida = []
+    for i, p in enumerate(palavras):
+        anterior_e_numero = i > 0 and palavras[i - 1][:1].isdigit()
+        if i > 0 and p[:1].isdigit():
+            p = p.lower()
+        elif anterior_e_numero and p.lower() in UNIDADES:
+            p = p.lower()
+        elif p.lower() in TAMANHOS:
+            p = p.upper()
+        saida.append(p)
+    return " ".join(saida)
 
 
 def normalizar(texto):
@@ -459,11 +472,14 @@ def _chave_produto(nome):
 def nomes_parecidos(a, b):
     """True se dois nomes de produto parecem o mesmo produto digitado de jeitos diferentes.
 
-    Números diferentes nunca são o mesmo ('Batom 01' x 'Batom 02', '50 ml' x '100 ml').
+    Números ou tamanhos diferentes nunca são o mesmo ('Batom 01' x 'Batom 02', '50 ml' x '100 ml',
+    'Camiseta G' x 'Camiseta GG').
     """
     ka, kb = _chave_produto(a), _chave_produto(b)
     if not ka or not kb or re.findall(r"\d+", ka.replace(" ", "")) != re.findall(r"\d+", kb.replace(" ", "")):
         return False
+    if sorted(w for w in ka.split() if w in TAMANHOS) != sorted(w for w in kb.split() if w in TAMANHOS):
+        return False                                  # tamanhos diferentes: 'Camiseta G' x 'Camiseta GG' 
     if ka.replace(" ", "") == kb.replace(" ", "") or sorted(ka.split()) == sorted(kb.split()):
         return True                                   # só espaço ou ordem das palavras mudou
     return SequenceMatcher(None, ka, kb).ratio() >= SEMELHANCA_MINIMA
