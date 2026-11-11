@@ -75,7 +75,7 @@ def sem_rolagem_lateral(pg):
 def abrir_cliente(pg, url, busca):
     pg.goto(url + "/clientes")
     pg.fill("#filtro", busca)
-    visiveis = pg.locator("#lista li:not([hidden]) a")
+    visiveis = pg.locator("#lista li:visible a")
     assert visiveis.count() == 1, f"busca {busca!r} deveria achar 1 cliente"
     visiveis.click()
 
@@ -165,12 +165,12 @@ def test_lista_de_clientes_filtra_sem_acento_e_mostra_credito(pagina, site):
     url, _ = site
     pg = pagina
     pg.goto(url + "/clientes")
-    assert pg.locator("#lista li:not([hidden])").count() == 3
+    assert pg.locator("#lista li:visible").count() == 3
     pg.fill("#filtro", "JARDIM")
-    assert pg.locator("#lista li:not([hidden])").count() == 1
+    assert pg.locator("#lista li:visible").count() == 1
     pg.fill("#filtro", "")
     pg.check("#so-devendo")
-    nomes = pg.locator("#lista li:not([hidden]) .nome").all_inner_texts()
+    nomes = pg.locator("#lista li:visible .nome").all_inner_texts()
     assert not any("Otávio" in n for n in nomes)                      # Otávio tem crédito, não deve
     pg.uncheck("#so-devendo")
     assert "crédito R$ 10,00" in pg.inner_text("#lista li:has-text('Otávio')")
@@ -314,7 +314,7 @@ def test_ordenar_por_maior_e_menor_saldo(pagina, site):
     url, _ = site
     pg = pagina
     pg.goto(url + "/clientes")
-    saldos = lambda: [int(s) for s in pg.locator("#lista li:not([hidden])").evaluate_all("els => els.map(e => e.dataset.saldo)")]
+    saldos = lambda: [int(s) for s in pg.locator("#lista li:visible").evaluate_all("els => els.map(e => e.dataset.saldo)")]
     pg.select_option("#ordem", "saldo")
     assert saldos() == sorted(saldos(), reverse=True)
     pg.select_option("#ordem", "menor")
@@ -430,7 +430,7 @@ def test_filtros_de_produto_e_busca_por_codigo(pagina, site):
     con.close()
     pg = pagina
     pg.goto(url + "/produtos")
-    visiveis = lambda: pg.locator("#lista li:not([hidden]) .produto-nome a").all_inner_texts()
+    visiveis = lambda: pg.locator("#lista li:visible .produto-nome a").all_inner_texts()
     pg.fill("#filtro", "73455")
     assert visiveis() == ["Essencial Clássico"]                                  # pelo código
     pg.fill("#filtro", "boticario")

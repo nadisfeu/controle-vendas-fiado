@@ -77,6 +77,8 @@
 }
 
 * { box-sizing: border-box; }
+/* 'hidden' sempre esconde, mesmo em itens com display próprio (lista de produtos, etc.) */
+[hidden] { display: none !important; }
 body {
   margin: 0; background: var(--fundo); color: var(--texto);
   font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;

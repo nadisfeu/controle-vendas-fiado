@@ -172,7 +172,8 @@ def formatar_nome(texto):
             continue
         letra = next((j for j, ch in enumerate(palavra) if ch.isalpha()), None)
         saida.append(palavra if letra is None else palavra[:letra] + palavra[letra].upper() + palavra[letra + 1:])
-    return " ".join(saida)
+    # depois de apóstrofo também é maiúscula: "d'ávila" -> "D'Ávila", "d’essence" -> "D’Essence"
+    return re.sub(r"([’'])(\w)", lambda m: m.group(1) + m.group(2).upper(), " ".join(saida))
 
 
 UNIDADES = {"ml", "l", "g", "kg", "mg", "cm", "mm", "m", "un", "und", "pct", "cx"}

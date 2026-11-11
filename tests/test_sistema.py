@@ -387,7 +387,7 @@ def test_paginas_de_impressao(cliente_http):
     ("MARTA JARDIM", "Marta Jardim"), ("heloisa campos", "Heloisa Campos"), ("  OTÁVIO   ribeira ", "Otávio Ribeira"),
     ("regina filha DE ze", "Regina Filha de Ze"), ("NEUSA FEIRA DO BAIRRO", "Neusa Feira do Bairro"),
     ("TERESA GUARDA-CHUVA", "Teresa Guarda-chuva"), ("lia (tia lia)", "Lia (Tia Lia)"), ("De souza", "De Souza"),
-    ("ana e maria", "Ana e Maria"), ("FEITO EM CASA", "Feito em Casa"), ("Zé NA roça", "Zé na Roça"), ("SALA 2", "Sala 2"), ("Élida", "Élida"),
+    ("ana e maria", "Ana e Maria"), ("maria d'ávila", "Maria D'Ávila"), ("LIZ D’ESSENCE", "Liz D’Essence"), ("FEITO EM CASA", "Feito em Casa"), ("Zé NA roça", "Zé na Roça"), ("SALA 2", "Sala 2"), ("Élida", "Élida"),
 ])
 def test_formatar_nome(antes, depois):
     assert db.formatar_nome(antes) == depois
@@ -1173,3 +1173,59 @@ def test_organizar_produtos_existentes_com_copia_e_sem_criar_repetido(tmp_path):
 def test_banco_sem_produtos_nao_faz_copia(tmp_path):
     db.conectar(str(tmp_path / "vazio.db")).close()
     assert not (tmp_path / "backups").exists()
+
+
+# ---------------------------------------------------------------- importar lista de produtos (nota de compra)
+
+def _csv(tmp_path, linhas, cabecalho="codigo;tipo;marca;nome;preco;quantidade", nome="lista.csv"):
+    arq = tmp_path / nome
+    arq.write_text(cabecalho + "\n" + "\n".join(linhas) + "\n", encoding="utf-8")
+    return arq
+
+
+def test_importar_lista_de_produtos(tmp_path, monkeypatch, capsys):
+    import sys as _sys
+    import importar_produtos as imp
+    banco = tmp_path / "dados.db"
+    con = db.conectar(str(banco))
+    ja_tem = db.criar_produto(con, "Quasar Blue Desodorante Colônia 100ml", 18990, estoque=1, codigo="51244",
+                              marca="O Boticário", tipo="Colonia")
+    db.criar_produto(con, "Egeo Dolce Desodorante Colônia 90ml", 16490, estoque=2, marca="O Boticário")  # sem código
+    con.close()
+    arq = _csv(tmp_path, [
+        "51244;Colônia;O Boticário;Quasar Blue Desodorante Colônia 100Ml;189,90;3",       # código já existe: soma
+        "82688;Colônia;O Boticário;Egeo Dolce Desodorante Colônia 90Ml;164,90;1",         # parecido sem código: conferir
+        "48303;Colônia;o boticario;Floratta Red Desodorante Colônia 75Ml;174,90;3",       # novo
+        ";Hidratante;;Creme Teste 50ml;31,99;4",                                           # novo, sem código/marca
+    ])
+    monkeypatch.setattr(_sys, "argv", ["importar_produtos.py", str(arq), "--banco", str(banco)])
+    imp.main()                                                                             # simulação: não grava
+    saida = capsys.readouterr().out
+    assert "1 a somar" in saida and "1 para conferir" in saida and "2 a criar" in saida and "nada gravado" in saida
+    con = db.conectar(str(banco))
+    assert con.execute("SELECT COUNT(*) FROM produtos").fetchone()[0] == 2 and db.produto(con, ja_tem)["estoque"] == 1
+    con.close()
+    monkeypatch.setattr(_sys, "argv", ["importar_produtos.py", str(arq), "--banco", str(banco), "--aplicar"])
+    imp.main()
+    con = db.conectar(str(banco))
+    assert db.produto(con, ja_tem)["estoque"] == 4                                         # 1 + 3
+    floratta = con.execute("SELECT * FROM produtos WHERE codigo = '48303'").fetchone()
+    assert (floratta["nome"], floratta["preco"], floratta["estoque"]) == ("Floratta Red Desodorante Colônia 75ml", 17490, 3)
+    assert (floratta["tipo"], floratta["marca"]) == ("Colonia", "O Boticário")             # grafias que já existiam
+    assert con.execute("SELECT COUNT(*) FROM produtos WHERE nome LIKE 'Egeo%'").fetchone()[0] == 1   # não duplicou
+    assert con.execute("SELECT estoque FROM produtos WHERE nome = 'Creme Teste 50ml'").fetchone()[0] == 4
+    assert len(list((tmp_path / "backups").glob("antes_importar_*.db"))) == 1
+    con.close()
+
+
+def test_importar_lista_falha_alto(tmp_path, monkeypatch):
+    import sys as _sys
+    import importar_produtos as imp
+    banco = tmp_path / "dados.db"
+    db.conectar(str(banco)).close()
+    for arq, erro in [(_csv(tmp_path, ["1;;;X;10;1"], cabecalho="nome;preco", nome="a.csv"), "cabeçalho"),
+                      (_csv(tmp_path, ["1;;;Produto;dez reais;1"], nome="b.csv"), "não é um valor válido"),
+                      (_csv(tmp_path, ["1;;;A;10;1", "1;;;B;10;1"], nome="c.csv"), "repetido na lista")]:
+        monkeypatch.setattr(_sys, "argv", ["importar_produtos.py", str(arq), "--banco", str(banco)])
+        with pytest.raises(SystemExit, match=erro):
+            imp.main()
