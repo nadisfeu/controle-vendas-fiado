@@ -109,7 +109,7 @@ def test_fluxo_venda_pagamento_cancelamento(pagina, site):
     pg.click("#avulso-adicionar")
     assert pg.inner_text("#total") == "R$ 199,80"                       # 2×89,90 + 2×7,50 + 5
     assert pg.inner_text("#saldo-depois") == "R$ 871,80"                # 672 + 199,80
-    campo = pg.locator("#carrinho li:has-text('Sabonete') input")
+    campo = pg.locator("#carrinho li:has-text('Sabonete') .preco-item input")
     campo.fill("6,00")
     campo.dispatch_event("change")
     assert pg.inner_text("#total") == "R$ 196,80"
@@ -293,11 +293,11 @@ def test_desconto_no_item_da_venda(pagina, site):
     assert not linha.locator(".desconto").is_visible()
     assert "Vendido por" in linha.inner_text()
 
-    linha.locator("input").click()                 # tocar seleciona o valor: digitar substitui
+    linha.locator(".preco-item input").click()                 # tocar seleciona o valor: digitar substitui
     pg.keyboard.type("170")
-    assert linha.locator("input").input_value() == "170"
+    assert linha.locator(".preco-item input").input_value() == "170"
     assert pg.inner_text("#total") == "R$ 170,00"                              # atualiza enquanto digita
-    assert linha.locator(".desconto").inner_text() == "Preço normal R$ 200,00 · desconto de R$ 30,00"
+    assert linha.locator(".desconto").inner_text() == "Preço normal R$ 200,00 · desconto de R$ 30,00 (15%)"
     assert pg.inner_text("#descontos") == "Descontos nesta venda: R$ 30,00"
     linha.locator(".mais").click()
     assert pg.inner_text("#total") == "R$ 340,00"
@@ -497,3 +497,36 @@ def test_produto_repetido_aviso_e_juntar(pagina, site):
     con = db.conectar(banco)
     assert db.produto(con, a)["estoque"] == 3
     con.close()
+
+
+def test_desconto_em_porcentagem(pagina, site):
+    url, banco = site
+    con = db.conectar(banco)
+    db.criar_produto(con, "Perfume Teste Porcento", 20000, estoque=5)
+    con.close()
+    pg = pagina
+    abrir_cliente(pg, url, "Neusa")
+    pg.click("text=Nova venda")
+    pg.fill("#busca-produto", "porcento")
+    pg.click("button.produto:has-text('Perfume Teste Porcento')")
+    linha = pg.locator("#carrinho li:has-text('Perfume Teste Porcento')")
+    linha.locator(".pct-item input").click()
+    pg.keyboard.type("10")
+    assert linha.locator(".preco-item input").input_value() == "180,00"           # 200 - 10%
+    assert "desconto de R$ 20,00 (10%)" in linha.locator(".desconto").inner_text()
+    linha.locator(".preco-item input").fill("150")                                 # o contrário: preço -> %
+    assert linha.locator(".pct-item input").input_value() == "25"
+    linha.locator(".pct-item input").fill("12,5")
+    assert linha.locator(".preco-item input").input_value() == "175,00"
+    # item avulso: a % vale sobre o valor digitado
+    pg.fill("#avulso-descricao", "Embrulho")
+    pg.fill("#avulso-preco", "50")
+    pg.click("#avulso-adicionar")
+    avulso = pg.locator("#carrinho li:has-text('Embrulho')")
+    avulso.locator(".pct-item input").fill("20")
+    assert avulso.locator(".preco-item input").input_value() == "40,00"
+    assert pg.inner_text("#total") == "R$ 215,00"                                  # 175 + 40
+    sem_rolagem_lateral(pg)
+    foto(pg, "17_desconto_porcentagem")
+    pg.click("#salvar")
+    assert "Venda de R$ 215,00 registrada" in pg.inner_text(".aviso") and "desconto de R$ 25,00" in pg.inner_text(".aviso")

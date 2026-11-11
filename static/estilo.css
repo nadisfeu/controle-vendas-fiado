@@ -289,7 +289,7 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--principal);
 @media (min-width: 520px) { .avulso { grid-template-columns: 2fr 1fr auto; } }
 .itens-carrinho { list-style: none; padding: 0; margin: 0 0 8px; }
 .itens-carrinho li {
-  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "desc desc rem" "qtd preco sub";
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "desc desc rem" "qtd preco sub" "pct pct pct";
   gap: 6px 10px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--borda);
 }
 .itens-carrinho .descricao { grid-area: desc; font-weight: 600; }
@@ -437,3 +437,7 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--principal);
   padding: 12px; border: 1px solid var(--borda); border-radius: var(--raio); cursor: pointer; font-weight: 400 !important; }
 .opcao-juntar input { width: auto; min-height: 0; }
 .opcao-juntar:has(input:checked) { border-color: var(--principal); background: var(--fundo); }
+
+/* desconto em % no item da venda */
+.pct-item { grid-area: pct; display: inline-flex; align-items: center; gap: 6px; color: var(--suave); font-size: .9rem; }
+.pct-item input { width: 72px; min-height: 36px; padding: 6px 8px; font-weight: 600; text-align: right; }

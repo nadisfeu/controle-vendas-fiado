@@ -24,6 +24,23 @@
     return `${sinal}R$ ${inteiro},${String(c % 100).padStart(2, '0')}`;
   }
   const produtoDe = item => produtos.find(p => p.id === item.produto_id);
+  // centavos -> "180,00" (como a pessoa digitaria no campo)
+  const campoReais = c => `${Math.floor(c / 100)},${String(c % 100).padStart(2, '0')}`;
+  // preço sobre o qual a porcentagem é calculada: o normal do produto, ou o digitado no item avulso
+  function precoBase(item) {
+    const prod = produtoDe(item);
+    if (prod) return centavos(prod.preco);
+    if (item.base === undefined) item.base = item.preco;
+    return centavos(item.base);
+  }
+  // "10" / "10,5" / "10%" -> 10.5; NaN se não for uma porcentagem de 0 a 100
+  function porcentagem(texto) {
+    const s = String(texto).replace('%', '').replace(',', '.').trim();
+    if (!/^\d+(\.\d+)?$/.test(s)) return NaN;
+    const n = parseFloat(s);
+    return n <= 100 ? n : NaN;
+  }
+  const mostrarPct = n => (Math.round(n * 10) / 10).toString().replace('.', ',');
 
   function desenharProdutos() {
     const lista = $('produtos');
@@ -89,6 +106,7 @@
         </label>
         <span class="subtotal"></span>
         <button type="button" class="remover" aria-label="Remover item">✕</button>
+        <label class="pct-item">Desconto <input inputmode="decimal" placeholder="0" aria-label="Desconto em porcentagem"> %</label>
         <span class="desconto" hidden></span>`;
       li.querySelector('.descricao').textContent = item.descricao;
       const prod = produtoDe(item);
@@ -98,12 +116,26 @@
         aviso.textContent = prod.estoque > 0 ? `⚠ só tem ${prod.estoque} em estoque` : '⚠ sem estoque';
         li.appendChild(aviso);
       }
-      const campo = li.querySelector('input');
+      const campo = li.querySelector('.preco-item input'), campoPct = li.querySelector('.pct-item input');
       campo.value = item.preco;
+      // porcentagem que o preço atual representa (para mostrar no campo de %)
+      const sincronizarPct = () => {
+        const base = precoBase(item), c = centavos(item.preco);
+        campoPct.value = !isNaN(c) && base > 0 && c < base ? mostrarPct((base - c) * 100 / base) : '';
+      };
+      sincronizarPct();
       campo.addEventListener('focus', () => campo.select());               // tocar já seleciona para digitar por cima
+      campoPct.addEventListener('focus', () => campoPct.select());
       // Só atualiza números, nunca redesenha aqui: ao sair do campo tocando em "Salvar venda", redesenhar
       // faz a página pular entre o dedo encostar e soltar, e o toque cai fora do botão (venda não salva).
-      campo.addEventListener('input', () => { item.preco = campo.value; atualizarNumeros(); });
+      campo.addEventListener('input', () => { item.preco = campo.value; sincronizarPct(); atualizarNumeros(); });
+      campoPct.addEventListener('input', () => {
+        const pct = campoPct.value.trim() === '' ? 0 : porcentagem(campoPct.value), base = precoBase(item);
+        if (isNaN(pct) || isNaN(base)) return;                             // continua digitando: não mexe ainda
+        item.preco = campoReais(Math.round(base * (100 - pct) / 100));
+        campo.value = item.preco;
+        atualizarNumeros();
+      });
       li.querySelector('.menos').addEventListener('click', () => {
         if (item.quantidade > 1) item.quantidade--; else carrinho.splice(idx, 1);
         desenhar();
@@ -137,7 +169,7 @@
         if (diferenca > 0) descontos += diferenca;
         desconto.classList.toggle('acima', diferenca < 0);
         desconto.textContent = diferenca > 0
-          ? `Preço normal ${reais(normal)} · desconto de ${reais(diferenca)}`
+          ? `Preço normal ${reais(normal)} · desconto de ${reais(diferenca)} (${mostrarPct((normal - c) * 100 / normal)}%)`
           : `Preço normal ${reais(normal)} · ${reais(-diferenca)} acima do normal`;
       }
     }
