@@ -1229,3 +1229,28 @@ def test_importar_lista_falha_alto(tmp_path, monkeypatch):
         monkeypatch.setattr(_sys, "argv", ["importar_produtos.py", str(arq), "--banco", str(banco)])
         with pytest.raises(SystemExit, match=erro):
             imp.main()
+
+
+
+def test_valor_em_estoque(con):
+    assert db.valor_em_estoque(con) == dict(valor=0, unidades=0, produtos=0)
+    perfume = db.criar_produto(con, "Perfume A", 17490, estoque=3)        # 524,70
+    db.criar_produto(con, "Batom B", 5490, estoque=1)                     # 54,90
+    db.criar_produto(con, "Sem Estoque", 9990, estoque=0)
+    db.criar_produto(con, "Vendeu Sem Ter", 1000, estoque=-2)             # não entra
+    parado = db.criar_produto(con, "Desativado Com Estoque", 1000, estoque=2)
+    db.atualizar_produto(con, parado, "Desativado Com Estoque", 1000, False)  # entra (as unidades existem)
+    assert db.valor_em_estoque(con) == dict(valor=52470 + 5490 + 2000, unidades=6, produtos=3)
+    c = db.criar_cliente(con, "Teca")
+    db.registrar_venda(con, c, "2026-11-11", [dict(produto_id=perfume, descricao="", quantidade=1, preco_unit=17490)])
+    assert db.valor_em_estoque(con)["unidades"] == 5                       # a venda tira do estoque
+
+
+def test_relatorios_mostra_valor_em_estoque(cliente_http):
+    http, banco = cliente_http
+    http.post("/entrar", data={"senha": "segredo"})
+    con = db.conectar(banco)
+    db.criar_produto(con, "Kaiak", 17490, estoque=2)
+    con.close()
+    pagina = http.get("/relatorios").get_data(as_text=True)
+    assert "Valor em estoque (hoje)" in pagina and "R$ 349,80" in pagina and "2 unidades em 1 produto," in pagina

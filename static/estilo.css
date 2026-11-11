@@ -441,3 +441,5 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--principal);
 /* desconto em % no item da venda */
 .pct-item { grid-area: pct; display: inline-flex; align-items: center; gap: 6px; color: var(--suave); font-size: .9rem; }
 .pct-item input { width: 72px; min-height: 36px; padding: 6px 8px; font-weight: 600; text-align: right; }
+.indicador-link { text-decoration: none; color: var(--texto); }
+.indicador-link:hover { border-color: var(--principal); }

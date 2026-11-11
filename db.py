@@ -818,6 +818,14 @@ def extrato_mes(con, cliente_id, ano_mes):
     return dict(resumo, linhas=linhas)
 
 
+def valor_em_estoque(con):
+    """Quanto o estoque rende pelo preço de venda: soma de quantidade x preço dos produtos com estoque.
+    Conta também os desativados (as unidades existem); estoque negativo (vendeu sem ter) não entra."""
+    r = con.execute("SELECT COALESCE(SUM(estoque * preco), 0), COALESCE(SUM(estoque), 0), COUNT(*)"
+                    " FROM produtos WHERE estoque > 0").fetchone()
+    return dict(valor=r[0], unidades=r[1], produtos=r[2])
+
+
 def vendas_por_dia(con, inicio, fim):
     """{'AAAA-MM-DD': (total em centavos, número de vendas)} das vendas não canceladas com data em [inicio, fim)."""
     return {r["data"]: (r["total"], r["vendas"]) for r in con.execute("""

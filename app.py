@@ -539,6 +539,7 @@ def criar_app(banco, senha, chave, cookie_seguro=False, csrf=True, pasta_copias=
         mes = mes_pedido()
         dia_de_hoje = date.today()
         return render_template("relatorios.html", mes=mes, nome_mes=db.nome_mes(mes), resumo=db.resumo_mes(con(), mes),
+                               estoque=db.valor_em_estoque(con()),
                                grafico=graficos.grafico_mes(con(), mes, dia_de_hoje),
                                mapa=graficos.mapa_ano(con(), int(mes[:4]), dia_de_hoje),
                                clientes=db.movimento_clientes_mes(con(), mes),

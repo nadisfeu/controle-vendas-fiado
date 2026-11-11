@@ -4,6 +4,8 @@
 <h1>Relatórios</h1>
 <details class="ajuda">
   <summary>Como usar</summary>
+  <p><b>Valor em estoque</b> é quanto dá tudo o que está em estoque vendido pelo preço normal (não é o que você
+  pagou). Esse número é de hoje, não muda com o mês escolhido.</p>
   <p><b>Vendas por dia</b> mostra, em colunas, quanto vendeu em cada dia do mês escolhido.
   <b>Melhor dia de cada mês</b> mostra o ano todo: uma linha por mês, um quadradinho por dia, e no fim da
   linha o dia que mais vendeu.</p>
@@ -25,6 +27,9 @@
   <div class="indicador"><span class="rotulo">Recebido no mês</span><span class="valor">{{ resumo.recebido|reais }}</span></div>
   <div class="indicador"><span class="rotulo">Descontos dados no mês</span><span class="valor">{{ resumo.descontos|reais }}</span>
     <span class="nota">diferença entre o preço normal e o vendido</span></div>
+  <a class="indicador indicador-link" href="{{ url_for('produtos') }}">
+    <span class="rotulo">Valor em estoque (hoje)</span><span class="valor">{{ estoque.valor|reais }}</span>
+    <span class="nota">{{ estoque.unidades }} unidade{{ 's' if estoque.unidades != 1 }} em {{ estoque.produtos }} produto{{ 's' if estoque.produtos != 1 }}, pelo preço de venda</span></a>
 </section>
 
 <section class="cartao grafico">
