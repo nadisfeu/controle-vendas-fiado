@@ -185,11 +185,23 @@ TAMANHOS = {
 }
 
 
-def e_quantidade_de_medida(palavra):
-    """Número que pode vir antes de unidade ('200 g', '1 l', '1,5 kg'). Com 5+ dígitos é referência
-    ('Sutiã Ref 720110 M': o M é tamanho, não metro)."""
-    c = palavra.replace(",", "").replace(".", "")
-    return c.isdigit() and len(c) <= 4
+PALAVRAS_DE_REFERENCIA = {"ref", "referencia", "cod", "codigo"}
+
+
+def e_quantidade_de_medida(palavras, j):
+    """A palavra palavras[j] é um número que pode vir antes de unidade ('200 g', '1 l', '0,5 kg')?
+
+    Não é (é referência, e a letra depois é tamanho): 5+ dígitos ('Ref 720110 M'), zero na frente
+    ('0045 M') ou logo depois de 'Ref'/'Cód' ('Ref 334 G')."""
+    if j < 0:
+        return False
+    p = palavras[j]
+    c = p.replace(",", "").replace(".", "")
+    if not (c.isdigit() and len(c) <= 4):
+        return False
+    if c[0] == "0" and len(c) > 1 and "," not in p and "." not in p:
+        return False
+    return not (j > 0 and normalizar(palavras[j - 1]).strip(".:") in PALAVRAS_DE_REFERENCIA)
 
 
 def e_codigo_de_modelo(palavra):
@@ -207,7 +219,7 @@ def formatar_nome_produto(texto):
     palavras = formatar_nome(texto).split(" ")
     saida = []
     for i, p in enumerate(palavras):
-        anterior_e_numero = i > 0 and e_quantidade_de_medida(palavras[i - 1])
+        anterior_e_numero = e_quantidade_de_medida(palavras, i - 1)
         if anterior_e_numero and p.lower() in UNIDADES:
             p = p.lower()                                  # '200 G' -> '200 g', '1 L' -> '1 l'
         elif p.lower() in TAMANHOS:
@@ -238,7 +250,7 @@ def organizar_nome_produto(nome):
     """
     palavras = nome.split(" ")
     chaves = [normalizar(p) for p in palavras]
-    tem_tamanho = any(c in TAMANHOS and not (i > 0 and e_quantidade_de_medida(chaves[i - 1]))
+    tem_tamanho = any(c in TAMANHOS and not e_quantidade_de_medida(chaves, i - 1)
                       for i, c in enumerate(chaves))
     if not tem_tamanho and not any(c in GENEROS for c in chaves):   # '90 g' é medida, não tamanho
         return nome
@@ -248,15 +260,15 @@ def organizar_nome_produto(nome):
 
     produto, genero, tamanho, outros = [], [], [], []
     for i, (p, c) in enumerate(zip(palavras, chaves)):
-        seguinte_e_unidade = i + 1 < len(chaves) and chaves[i + 1] in UNIDADES and e_quantidade_de_medida(c)
+        seguinte_e_unidade = i + 1 < len(chaves) and chaves[i + 1] in UNIDADES and e_quantidade_de_medida(chaves, i)
         if c in GENEROS:
             genero.append(p)
-        elif c in TAMANHOS and not (i > 0 and e_quantidade_de_medida(chaves[i - 1])):
+        elif c in TAMANHOS and not e_quantidade_de_medida(chaves, i - 1):
             tamanho.append(p)
         elif c in CORES or e_codigo_de_modelo(c):
             outros.append(p)                               # cor e código do modelo vão para o fim
         elif re.fullmatch(r"\d+[a-z]+", c) or (c.isdigit() and seguinte_e_unidade) or (
-                c in UNIDADES and i > 0 and e_quantidade_de_medida(chaves[i - 1])):
+                c in UNIDADES and e_quantidade_de_medida(chaves, i - 1)):
             outros.append(p)                               # medida: '100ml', '200 g'
         elif c.isdigit() and all(e_extra(j) for j in range(i + 1, len(chaves))):
             tamanho.append(p)                              # número no fim: tamanho ('Calça Jeans 38')

@@ -1149,6 +1149,8 @@ def test_padronizacao_v2_conserta_tamanhos_de_quem_rodou_a_v1(tmp_path):
     # número grande é referência: a letra depois é tamanho, não unidade
     ("Sutiã Ref 720110 M", "Sutiã Ref 720110 M"), ("Sutiã Ref 9201511 G", "Sutiã Ref 9201511 G"),
     ("creme 200 G", "Creme 200 g"), ("Óleo 1,5 L", "Óleo 1,5 l"),
+    ("Sutiã Naiane Rodrigues Ref 0045 M", "Sutiã Naiane Rodrigues Ref 0045 M"),
+    ("Sutiã Linda Ref 334 G", "Sutiã Linda Ref 334 G"), ("Óleo 0,5 L", "Óleo 0,5 l"),
 ])
 def test_organiza_nome_de_roupa(antes, depois):
     assert db.formatar_nome_produto(antes) == depois
