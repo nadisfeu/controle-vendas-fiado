@@ -1349,3 +1349,94 @@ def test_banco_antigo_perde_o_nome_unico_sem_perder_nada(tmp_path):
     assert list((tmp_path / "backups").glob("antes_nome_de_produto_sem_unico_*.db"))       # cópia antes
     con.close()
     db.conectar(str(arq)).close()                                                          # rodar de novo: nada muda
+
+
+# ---------------------------------------------------------------- referência no nome / desfazer importação
+@pytest.mark.parametrize("digitado, esperado", [
+    ("Sutiã Flor de Dália Ref 7201140 M", "Sutiã Flor de Dália Ref 7201140 M"),
+    ("Sutiã Ref 7201205 48", "Sutiã Ref 7201205 48"),
+    ("Sutiã Tomara que Caia Preto Ref 123 P", "Sutiã Tomara que Caia Ref 123 P Preto"),
+    ("Relógio Lince Feminino Ref LRMM049L36", "Relógio Lince Feminino Ref LRMM049L36"),
+    ("Relógio Feminino Lince ref 4298", "Relógio Lince Feminino Ref 4298"),
+    ("Sutiã Tomara que Caia Naiane Rodrigues Ref 03 50", "Sutiã Tomara que Caia Naiane Rodrigues Ref 03 50"),
+    ("Sutiã Tomara que Caia Preto P", "Sutiã Tomara que Caia P Preto"),
+])
+def test_referencia_fica_antes_do_tamanho(digitado, esperado):
+    assert db.formatar_nome_produto(digitado) == esperado
+    assert db.formatar_nome_produto(esperado) == esperado                     # formatar de novo não muda
+
+
+def _importar(monkeypatch, *argv):
+    import sys as _sys
+    import importar_produtos as imp
+    monkeypatch.setattr(_sys, "argv", ["importar_produtos.py", *map(str, argv)])
+    imp.main()
+
+
+def _desfazer(monkeypatch, *argv):
+    import sys as _sys
+    import desfazer_importacao as des
+    monkeypatch.setattr(_sys, "argv", ["desfazer_importacao.py", *map(str, argv)])
+    des.main()
+
+
+def test_desfazer_importacao_volta_a_copia(tmp_path, monkeypatch, capsys):
+    banco = tmp_path / "dados.db"
+    con = db.conectar(str(banco))
+    antigo = db.criar_produto(con, "Kaiak 100ml", 17490, estoque=2, codigo="111")
+    cli = db.criar_cliente(con, "Teca")
+    db.registrar_venda(con, cli, "2026-11-10", [dict(produto_id=antigo, descricao="", quantidade=1, preco_unit=17490)])
+    con.close()
+    arq = _csv(tmp_path, ["7201140-M;Sutiã;Flor de Dália;Sutiã Flor de Dália M;69,00;8",
+                          ";Sutiã;Flor de Dália;Sutiã Tomara que Caia Preto P;75,00;3"])
+    _importar(monkeypatch, arq, "--banco", banco, "--aplicar")
+    _desfazer(monkeypatch, arq, "--banco", banco)                              # só confere
+    saida = capsys.readouterr().out
+    assert "2 produtos saem" in saida and "nada mudou" in saida
+    con = db.conectar(str(banco))
+    assert con.execute("SELECT COUNT(*) FROM produtos").fetchone()[0] == 3
+    con.close()
+    _desfazer(monkeypatch, arq, "--banco", banco, "--aplicar")
+    con = db.conectar(str(banco))
+    assert [r["nome"] for r in con.execute("SELECT nome FROM produtos")] == ["Kaiak 100ml"]
+    assert db.produto(con, antigo)["estoque"] == 1                             # a venda de antes continua
+    assert con.execute("SELECT COUNT(*) FROM vendas").fetchone()[0] == 1
+    con.close()
+    assert len(list((tmp_path / "backups").glob("antes_desfazer_*.db"))) == 1
+    arq_ref = _csv(tmp_path, ["7201140-M;Sutiã;Flor de Dália;Sutiã Flor de Dália Ref 7201140 M;69,00;8"], nome="ref.csv")
+    _importar(monkeypatch, arq_ref, "--banco", banco, "--aplicar")             # a lista nova entra
+    _importar(monkeypatch, arq, "--banco", banco)                              # e a antiga não está mais marcada
+    con = db.conectar(str(banco))
+    assert con.execute("SELECT nome FROM produtos WHERE codigo = '7201140-M'").fetchone()[0] == \
+        "Sutiã Flor de Dália Ref 7201140 M"
+    con.close()
+
+
+def test_desfazer_recusa_se_houve_venda_depois(tmp_path, monkeypatch):
+    banco = tmp_path / "dados.db"
+    db.conectar(str(banco)).close()
+    arq = _csv(tmp_path, ["9201507-GG;Sutiã;Flor de Dália;Sutiã Flor de Dália GG;79,00;7"])
+    _importar(monkeypatch, arq, "--banco", banco, "--aplicar")
+    con = db.conectar(str(banco))
+    sutia = con.execute("SELECT id FROM produtos").fetchone()[0]
+    cli = db.criar_cliente(con, "Teca")
+    db.registrar_venda(con, cli, "2026-11-12", [dict(produto_id=sutia, descricao="", quantidade=1, preco_unit=7900)])
+    con.close()
+    with pytest.raises(SystemExit, match="NÃO VOLTEI"):
+        _desfazer(monkeypatch, arq, "--banco", banco, "--aplicar")
+    con = db.conectar(str(banco))
+    assert con.execute("SELECT COUNT(*) FROM vendas").fetchone()[0] == 1       # nada foi apagado
+    assert con.execute("SELECT estoque FROM produtos").fetchone()[0] == 6
+    con.close()
+
+
+def test_desfazer_recusa_produto_que_nao_e_da_lista(tmp_path, monkeypatch):
+    banco = tmp_path / "dados.db"
+    db.conectar(str(banco)).close()
+    arq = _csv(tmp_path, ["6991-M;Sutiã;Zed;Sutiã Zed M;95,90;16"])
+    _importar(monkeypatch, arq, "--banco", banco, "--aplicar")
+    con = db.conectar(str(banco))
+    db.criar_produto(con, "Batom Vermelho", 3990, estoque=1)                   # cadastrado pelo site depois
+    con.close()
+    with pytest.raises(SystemExit, match="não é desta lista"):
+        _desfazer(monkeypatch, arq, "--banco", banco, "--aplicar")

@@ -289,7 +289,9 @@ def organizar_nome_produto(nome):
     """Ordem fixa para roupa: nome do produto, gênero, tamanho, depois cor e medidas.
 
     'Camisa GG Regata Masculina Azul' -> 'Camisa Regata Masculina GG Azul';
-    'Calça Jeans 38 Feminina' -> 'Calça Jeans Feminina 38'.
+    'Calça Jeans 38 Feminina' -> 'Calça Jeans Feminina 38';
+    'Relógio Ref 4298 Feminino' -> 'Relógio Feminino Ref 4298' (a referência anda junto com o número dela,
+    depois do gênero e antes do tamanho: 'Sutiã Ref 720110 M').
     Só mexe em nome que tenha gênero ou tamanho (P, M, G...): cosmético e o resto ficam como estão
     ('Rosa Mosqueta Óleo', 'Kit 3 Sabonetes'). As palavras do nome mantêm a ordem em que foram digitadas.
     """
@@ -303,8 +305,14 @@ def organizar_nome_produto(nome):
     def e_extra(i):          # gênero, tamanho ou cor: o que pode sair do meio do nome
         return chaves[i] in GENEROS or chaves[i] in TAMANHOS or chaves[i] in CORES
 
-    produto, genero, tamanho, outros = [], [], [], []
+    produto, genero, tamanho, outros, referencia = [], [], [], [], []
     for i, (p, c) in enumerate(zip(palavras, chaves)):
+        if referencia and len(referencia) % 2:             # palavra logo depois de 'Ref': anda junto com ela
+            referencia.append(p)
+            continue
+        if c.strip(".:") in PALAVRAS_DE_REFERENCIA and i + 1 < len(chaves):
+            referencia.append(p)                           # 'Ref 7201205' fica junto, antes do tamanho
+            continue
         seguinte_e_unidade = i + 1 < len(chaves) and chaves[i + 1] in UNIDADES and e_quantidade_de_medida(chaves, i)
         if c in GENEROS:
             genero.append(p)
@@ -321,7 +329,7 @@ def organizar_nome_produto(nome):
             produto.append(p)
     if not produto:                                        # só gênero/tamanho/cor: não tem o que reorganizar
         return nome
-    novo = " ".join(produto + genero + tamanho + outros)
+    novo = " ".join(produto + genero + referencia + tamanho + outros)
     return novo[:1].upper() + novo[1:]
 
 
