@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS clientes (
 CREATE TABLE IF NOT EXISTS produtos (
     id         INTEGER PRIMARY KEY,
     nome       TEXT NOT NULL,
-    nome_busca TEXT NOT NULL UNIQUE,
+    nome_busca TEXT NOT NULL,                       -- pode repetir se os códigos forem diferentes
     preco      INTEGER NOT NULL CHECK (preco >= 0),
     estoque    INTEGER NOT NULL DEFAULT 0,          -- pode ficar negativo: vendeu sem ter (encomenda)
     codigo     TEXT,                                -- opcional; se preenchido, não repete (sem diferença de maiúscula)
@@ -113,7 +113,10 @@ def _atualizar_banco_antigo(con):
     if "tipo" not in {r["name"] for r in con.execute("PRAGMA table_info(produtos)")}:
         with con:
             con.execute("ALTER TABLE produtos ADD COLUMN tipo TEXT NOT NULL DEFAULT ''")
+    if _nome_de_produto_e_unico(con):
+        _tirar_unico_do_nome_de_produto(con)
     con.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_produtos_codigo ON produtos(upper(codigo)) WHERE codigo IS NOT NULL")
+    con.execute("CREATE INDEX IF NOT EXISTS ix_produtos_nome ON produtos(nome_busca)")
     if not ler_meta(con, "produtos_nomes_padronizados_v4"):     # v4: ordem nome/gênero/tamanho/cor; XL, 2XL, G1...
         if con.execute("SELECT 1 FROM produtos LIMIT 1").fetchone():
             _copia_antes_de_mudar(con, "organizar_nomes_produtos")
@@ -123,6 +126,48 @@ def _atualizar_banco_antigo(con):
     if "ultimo_pagamento_planilha" not in colunas:
         with con:
             con.execute("ALTER TABLE clientes ADD COLUMN ultimo_pagamento_planilha TEXT")
+
+
+def _nome_de_produto_e_unico(con):
+    for indice in con.execute("PRAGMA index_list(produtos)").fetchall():
+        colunas = [c["name"] for c in con.execute(f"PRAGMA index_info('{indice['name']}')")]
+        if indice["unique"] and colunas == ["nome_busca"]:
+            return True
+    return False
+
+
+def _tirar_unico_do_nome_de_produto(con):
+    """Bancos antigos não deixavam dois produtos com o mesmo nome. Agora pode, se os códigos forem
+    diferentes (ex.: 'Sutiã Flor de Dália 48' cód. 7201205-48 e cód. 7201203-48).
+    O SQLite não remove UNIQUE com ALTER: refaz a tabela, copiando tudo, com cópia do banco antes."""
+    if con.execute("SELECT 1 FROM produtos LIMIT 1").fetchone():
+        _copia_antes_de_mudar(con, "nome_de_produto_sem_unico")
+    colunas = [r["name"] for r in con.execute("PRAGMA table_info(produtos)")]
+    lista = ", ".join(colunas)
+    con.commit()
+    con.execute("PRAGMA foreign_keys = OFF")        # itens_venda aponta para produtos durante a troca
+    try:
+        with con:
+            con.execute("""CREATE TABLE produtos_novo (
+                id INTEGER PRIMARY KEY, nome TEXT NOT NULL, nome_busca TEXT NOT NULL,
+                preco INTEGER NOT NULL CHECK (preco >= 0), estoque INTEGER NOT NULL DEFAULT 0, codigo TEXT,
+                marca TEXT NOT NULL DEFAULT '', tipo TEXT NOT NULL DEFAULT '', ativo INTEGER NOT NULL DEFAULT 1,
+                criado_em TEXT NOT NULL DEFAULT (datetime('now', 'localtime')))""")
+            padrao = {"criado_em": "datetime('now', 'localtime')", "marca": "''", "tipo": "''",
+                      "estoque": "0", "ativo": "1"}           # bancos muito antigos podem ter vazio aqui
+            valores = ", ".join(f"COALESCE({c}, {padrao[c]})" if c in padrao else c for c in colunas)
+            con.execute(f"INSERT INTO produtos_novo ({lista}) SELECT {valores} FROM produtos")
+            antes = con.execute("SELECT COUNT(*) FROM produtos").fetchone()[0]
+            depois = con.execute("SELECT COUNT(*) FROM produtos_novo").fetchone()[0]
+            if antes != depois:
+                raise RuntimeError(f"cópia da tabela de produtos não bate: {antes} x {depois}")
+            con.execute("DROP TABLE produtos")
+            con.execute("ALTER TABLE produtos_novo RENAME TO produtos")
+            problemas = con.execute("PRAGMA foreign_key_check").fetchall()
+            if problemas:
+                raise RuntimeError(f"vendas apontando para produto que não existe: {len(problemas)}")
+    finally:
+        con.execute("PRAGMA foreign_keys = ON")
 
 
 def ler_meta(con, chave):
@@ -523,12 +568,21 @@ def _limpar_codigo(con, codigo, ignorar_id=None):
     return codigo
 
 
+def _checar_nome_de_produto(con, nome, codigo, ignorar_id=None):
+    """Mesmo nome só pode se este e todos os de mesmo nome tiverem código (e o código já é único)."""
+    iguais = [r for r in con.execute("SELECT id, nome, codigo FROM produtos WHERE nome_busca = ?", (normalizar(nome),))
+              if r["id"] != ignorar_id]
+    if iguais and (not codigo or any(not r["codigo"] for r in iguais)):
+        raise ErroDeCadastro(f'Já existe um produto chamado "{iguais[0]["nome"]}". Se for outro modelo, '
+                             'preencha o código (os dois precisam ter código) para diferenciar.')
+
+
 def criar_produto(con, nome, preco, estoque=0, codigo="", marca="", tipo=""):
     nome = formatar_nome_produto(nome)
     if not nome:
         raise ErroDeCadastro("O nome do produto é obrigatório.")
-    _checar_nome_livre(con, "produtos", nome)
     codigo = _limpar_codigo(con, codigo)
+    _checar_nome_de_produto(con, nome, codigo)
     with con:
         cur = con.execute("INSERT INTO produtos (nome, nome_busca, preco, estoque, codigo, marca, tipo)"
                           " VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -541,9 +595,9 @@ def atualizar_produto(con, produto_id, nome, preco, ativo, estoque=None, codigo=
     nome = formatar_nome_produto(nome)
     if not nome:
         raise ErroDeCadastro("O nome do produto é obrigatório.")
-    _checar_nome_livre(con, "produtos", nome, ignorar_id=produto_id)
     atual = produto(con, produto_id)
     codigo = atual["codigo"] if codigo is None else _limpar_codigo(con, codigo, ignorar_id=produto_id)
+    _checar_nome_de_produto(con, nome, codigo, ignorar_id=produto_id)
     marca = atual["marca"] if marca is None else formatar_nome(marca)
     tipo = atual["tipo"] if tipo is None else formatar_nome(tipo)
     with con:

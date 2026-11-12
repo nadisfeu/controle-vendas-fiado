@@ -394,7 +394,8 @@ def criar_app(banco, senha, chave, cookie_seguro=False, csrf=True, pasta_copias=
                 preco, estoque = db.reais_para_centavos(f.get("preco", "")), db.ler_quantidade(f.get("estoque"))
                 # parece com um que já existe? pergunta antes de criar outro ("não quis dizer...?")
                 if f.get("confirmar_novo") != "1":
-                    sugestoes = db.produtos_parecidos(con(), f.get("nome", ""), f.get("marca", ""))
+                    sugestoes = db.produtos_parecidos(con(), f.get("nome", ""), f.get("marca", ""),
+                                                      codigo=f.get("codigo", ""))
                 if not sugestoes:
                     db.criar_produto(con(), f.get("nome", ""), preco, estoque, f.get("codigo", ""), f.get("marca", ""),
                                      f.get("tipo", ""))

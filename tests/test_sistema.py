@@ -1299,3 +1299,53 @@ def test_mesma_lista_nao_importa_duas_vezes(tmp_path, monkeypatch, capsys):
     con = db.conectar(str(banco))
     assert con.execute("SELECT estoque FROM produtos WHERE codigo = 'R1'").fetchone()[0] == 2
     con.close()
+
+
+
+# ---------------------------------------------------------------- mesmo nome com códigos diferentes
+
+def test_mesmo_nome_de_produto_com_codigos_diferentes(con):
+    a = db.criar_produto(con, "Sutiã Flor de Dália 48", 11500, codigo="7201205-48")
+    b = db.criar_produto(con, "Sutiã Flor de Dália 48", 11000, codigo="7201203-48")      # outro modelo: pode
+    assert db.produto(con, a)["nome"] == db.produto(con, b)["nome"]
+    with pytest.raises(ErroDeCadastro, match="preencha o código"):
+        db.criar_produto(con, "Sutiã Flor de Dália 48", 9000)                              # sem código: não
+    db.criar_produto(con, "Batom Matte", 3000)
+    with pytest.raises(ErroDeCadastro, match="Já existe"):
+        db.criar_produto(con, "batom matte", 3000, codigo="B1")                            # o outro não tem código
+    with pytest.raises(ErroDeCadastro, match="já é do produto"):
+        db.criar_produto(con, "Sutiã Flor de Dália 48", 9000, codigo="7201205-48")         # código repetido
+    with pytest.raises(ErroDeCadastro, match="preencha o código"):
+        db.atualizar_produto(con, b, "Sutiã Flor de Dália 48", 11000, True, codigo="")     # tirar o código: não
+    assert db.possiveis_repetidos(con) == []
+
+
+def test_banco_antigo_perde_o_nome_unico_sem_perder_nada(tmp_path):
+    import sqlite3
+    arq = tmp_path / "antigo.db"
+    db.conectar(str(arq)).close()
+    bruto = sqlite3.connect(arq)                      # volta a tabela de produtos ao formato antigo (nome único)
+    bruto.executescript("""
+        PRAGMA foreign_keys = OFF;
+        DROP TABLE produtos;
+        CREATE TABLE produtos (id INTEGER PRIMARY KEY, nome TEXT NOT NULL, nome_busca TEXT NOT NULL UNIQUE,
+            preco INTEGER NOT NULL, ativo INTEGER NOT NULL DEFAULT 1, criado_em TEXT, estoque INTEGER NOT NULL DEFAULT 0,
+            codigo TEXT, marca TEXT NOT NULL DEFAULT '', tipo TEXT NOT NULL DEFAULT '');
+        INSERT INTO produtos (id, nome, nome_busca, preco, estoque, codigo) VALUES (7, 'Kaiak 100ml', 'kaiak 100ml', 15000, 3, 'K1');
+        INSERT INTO clientes (id, nome, nome_busca) VALUES (1, 'Rosa', 'rosa');
+        INSERT INTO vendas (id, cliente_id, data) VALUES (1, 1, '2026-11-01');
+        INSERT INTO itens_venda (venda_id, produto_id, descricao, quantidade, preco_unit) VALUES (1, 7, 'Kaiak', 1, 15000);
+    """)
+    bruto.commit(); bruto.close()
+    con = db.conectar(str(arq))
+    assert not db._nome_de_produto_e_unico(con)
+    p = db.produto(con, 7)
+    assert (p["nome"], p["estoque"], p["codigo"]) == ("Kaiak 100ml", 3, "K1")             # dados intactos
+    assert db.cliente(con, 1)["saldo"] == 15000                                            # venda continua ligada
+    assert con.execute("PRAGMA foreign_keys").fetchone()[0] == 1                           # proteção religada
+    db.criar_produto(con, "Kaiak 100ml", 15000, codigo="K2")                               # agora pode, com código
+    with pytest.raises(ErroDeCadastro):
+        db.criar_produto(con, "Outro", 100, codigo="k1")                                   # código continua único
+    assert list((tmp_path / "backups").glob("antes_nome_de_produto_sem_unico_*.db"))       # cópia antes
+    con.close()
+    db.conectar(str(arq)).close()                                                          # rodar de novo: nada muda
