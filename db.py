@@ -185,6 +185,13 @@ TAMANHOS = {
 }
 
 
+def e_quantidade_de_medida(palavra):
+    """Número que pode vir antes de unidade ('200 g', '1 l', '1,5 kg'). Com 5+ dígitos é referência
+    ('Sutiã Ref 720110 M': o M é tamanho, não metro)."""
+    c = palavra.replace(",", "").replace(".", "")
+    return c.isdigit() and len(c) <= 4
+
+
 def e_codigo_de_modelo(palavra):
     """Código de modelo/referência: letras e depois números, 4+ caracteres ('LRMM049L36', 'XMPP0055', 'MRG4162L').
     Tamanho ('G1', '2XL') e medida ('100ml') não contam."""
@@ -200,7 +207,7 @@ def formatar_nome_produto(texto):
     palavras = formatar_nome(texto).split(" ")
     saida = []
     for i, p in enumerate(palavras):
-        anterior_e_numero = i > 0 and palavras[i - 1][:1].isdigit()
+        anterior_e_numero = i > 0 and e_quantidade_de_medida(palavras[i - 1])
         if anterior_e_numero and p.lower() in UNIDADES:
             p = p.lower()                                  # '200 G' -> '200 g', '1 L' -> '1 l'
         elif p.lower() in TAMANHOS:
@@ -231,7 +238,8 @@ def organizar_nome_produto(nome):
     """
     palavras = nome.split(" ")
     chaves = [normalizar(p) for p in palavras]
-    tem_tamanho = any(c in TAMANHOS and not (i > 0 and chaves[i - 1][:1].isdigit()) for i, c in enumerate(chaves))
+    tem_tamanho = any(c in TAMANHOS and not (i > 0 and e_quantidade_de_medida(chaves[i - 1]))
+                      for i, c in enumerate(chaves))
     if not tem_tamanho and not any(c in GENEROS for c in chaves):   # '90 g' é medida, não tamanho
         return nome
 
@@ -240,15 +248,15 @@ def organizar_nome_produto(nome):
 
     produto, genero, tamanho, outros = [], [], [], []
     for i, (p, c) in enumerate(zip(palavras, chaves)):
-        seguinte_e_unidade = i + 1 < len(chaves) and chaves[i + 1] in UNIDADES
+        seguinte_e_unidade = i + 1 < len(chaves) and chaves[i + 1] in UNIDADES and e_quantidade_de_medida(c)
         if c in GENEROS:
             genero.append(p)
-        elif c in TAMANHOS and not (i > 0 and chaves[i - 1][:1].isdigit()):
+        elif c in TAMANHOS and not (i > 0 and e_quantidade_de_medida(chaves[i - 1])):
             tamanho.append(p)
         elif c in CORES or e_codigo_de_modelo(c):
             outros.append(p)                               # cor e código do modelo vão para o fim
         elif re.fullmatch(r"\d+[a-z]+", c) or (c.isdigit() and seguinte_e_unidade) or (
-                c in UNIDADES and i > 0 and chaves[i - 1].isdigit()):
+                c in UNIDADES and i > 0 and e_quantidade_de_medida(chaves[i - 1])):
             outros.append(p)                               # medida: '100ml', '200 g'
         elif c.isdigit() and all(e_extra(j) for j in range(i + 1, len(chaves))):
             tamanho.append(p)                              # número no fim: tamanho ('Calça Jeans 38')
@@ -580,10 +588,16 @@ def _mesma_marca_possivel(a, b):
     return not a or not b or normalizar(a) == normalizar(b)
 
 
-def produtos_parecidos(con, nome, marca="", ignorar_id=None):
+def _codigos_diferentes(a, b):
+    """Os dois têm código e são códigos diferentes: são produtos diferentes ('Egeo Dolce' 82688 x 'Egeo Red' 82690)."""
+    return bool(a and b) and a.strip().upper() != b.strip().upper()
+
+
+def produtos_parecidos(con, nome, marca="", ignorar_id=None, codigo=""):
     """Produtos já cadastrados que parecem ser este (para o aviso 'não quis dizer...?')."""
     return [p for p in produtos(con, apenas_ativos=False)
-            if p["id"] != ignorar_id and _mesma_marca_possivel(p["marca"], marca) and nomes_parecidos(p["nome"], nome)]
+            if p["id"] != ignorar_id and not _codigos_diferentes(p["codigo"], codigo)
+            and _mesma_marca_possivel(p["marca"], marca) and nomes_parecidos(p["nome"], nome)]
 
 
 def _pares_ignorados(con):
@@ -604,6 +618,7 @@ def possiveis_repetidos(con):
     for i, a in enumerate(lista):
         for b in lista[i + 1:]:
             if (f"{min(a['id'], b['id'])}-{max(a['id'], b['id'])}" not in ignorados
+                    and not _codigos_diferentes(a["codigo"], b["codigo"])
                     and _mesma_marca_possivel(a["marca"], b["marca"]) and nomes_parecidos(a["nome"], b["nome"])):
                 pares.append((a, b))
     return pares

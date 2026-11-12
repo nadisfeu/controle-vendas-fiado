@@ -1146,6 +1146,9 @@ def test_padronizacao_v2_conserta_tamanhos_de_quem_rodou_a_v1(tmp_path):
     ("Relógio Feminino Lince LRMM049L36", "Relógio Lince Feminino LRMM049L36"),
     ("relogio masculino x-games xmpp0055", "Relogio X-games Masculino XMPP0055"),
     ("Floratta Red V2 75ml", "Floratta Red V2 75ml"), ("Kit 3 Sabonetes", "Kit 3 Sabonetes"),
+    # número grande é referência: a letra depois é tamanho, não unidade
+    ("Sutiã Ref 720110 M", "Sutiã Ref 720110 M"), ("Sutiã Ref 9201511 G", "Sutiã Ref 9201511 G"),
+    ("creme 200 G", "Creme 200 g"), ("Óleo 1,5 L", "Óleo 1,5 l"),
 ])
 def test_organiza_nome_de_roupa(antes, depois):
     assert db.formatar_nome_produto(antes) == depois
@@ -1263,3 +1266,34 @@ def test_relatorios_mostra_valor_em_estoque(cliente_http):
     con.close()
     pagina = http.get("/relatorios").get_data(as_text=True)
     assert "Valor em estoque (hoje)" in pagina and "R$ 349,80" in pagina and "2 unidades em 1 produto," in pagina
+
+
+
+def test_codigos_diferentes_nunca_sao_repetidos(con):
+    db.criar_produto(con, "Egeo Dolce Desodorante Colônia 90ml", 16490, codigo="82688", marca="O Boticário")
+    db.criar_produto(con, "Egeo Red Desodorante Colônia 90ml", 16490, codigo="82690", marca="O Boticário")
+    assert db.nomes_parecidos("Egeo Dolce Desodorante Colônia 90ml", "Egeo Red Desodorante Colônia 90ml")
+    assert db.possiveis_repetidos(con) == []                                  # códigos diferentes: não pergunta
+    assert db.produtos_parecidos(con, "Egeo Rede Desodorante Colônia 90ml", codigo="99999") == []
+    sem_codigo = [x["nome"] for x in db.produtos_parecidos(con, "Egeo Rede Desodorante Colônia 90ml")]
+    assert "Egeo Red Desodorante Colônia 90ml" in sem_codigo                  # sem código: pergunta
+
+
+def test_mesma_lista_nao_importa_duas_vezes(tmp_path, monkeypatch, capsys):
+    import sys as _sys
+    import importar_produtos as imp
+    banco = tmp_path / "dados.db"
+    db.conectar(str(banco)).close()
+    arq = _csv(tmp_path, ["R1;Relógio;Lince;Relógio Masculino Lince R1X2;100,00;1"])
+    monkeypatch.setattr(_sys, "argv", ["importar_produtos.py", str(arq), "--banco", str(banco), "--aplicar"])
+    imp.main()
+    with pytest.raises(SystemExit, match="já foi importada"):
+        imp.main()                                                             # de novo: recusa
+    con = db.conectar(str(banco))
+    assert con.execute("SELECT estoque FROM produtos WHERE codigo = 'R1'").fetchone()[0] == 1
+    con.close()
+    monkeypatch.setattr(_sys, "argv", ["importar_produtos.py", str(arq), "--banco", str(banco), "--aplicar", "--repetir"])
+    imp.main()                                                                 # pedindo explicitamente: soma
+    con = db.conectar(str(banco))
+    assert con.execute("SELECT estoque FROM produtos WHERE codigo = 'R1'").fetchone()[0] == 2
+    con.close()

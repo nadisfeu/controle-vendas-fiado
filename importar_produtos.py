@@ -15,6 +15,8 @@ Uso:
 """
 import argparse
 import csv
+import hashlib
+import json
 from datetime import datetime
 from pathlib import Path
 
@@ -59,7 +61,8 @@ def planejar(con, linhas):
             if existente:
                 plano.append(("somar", l, existente))
                 continue
-        parecidos = db.produtos_parecidos(con, l["nome"], _grafia_existente(l["marca"], db.marcas(con)) if l["marca"] else "")
+        parecidos = db.produtos_parecidos(con, l["nome"], _grafia_existente(l["marca"], db.marcas(con)) if l["marca"] else "",
+                                          codigo=l["codigo"])
         plano.append(("conferir", l, parecidos) if parecidos else ("criar", l, None))
     return plano
 
@@ -96,11 +99,19 @@ def main():
     ap.add_argument("lista", type=Path)
     ap.add_argument("--banco", default=str(Path(__file__).resolve().parent / "dados.db"))
     ap.add_argument("--aplicar", action="store_true", help="grava no banco (sem isso só mostra)")
+    ap.add_argument("--repetir", action="store_true",
+                    help="importar de novo uma lista que já foi importada (soma o estoque outra vez)")
     a = ap.parse_args()
     if not Path(a.banco).exists():
         raise SystemExit(f"ERRO: banco não encontrado em {a.banco}")
     linhas = ler_lista(a.lista)
     con = db.conectar(a.banco)
+    # a mesma lista duas vezes somaria o estoque de novo: recusa, a não ser que peçam --repetir
+    marca_da_lista = hashlib.sha256(a.lista.read_bytes()).hexdigest()
+    ja_importadas = json.loads(db.ler_meta(con, "listas_importadas") or "{}")
+    if marca_da_lista in ja_importadas and not a.repetir:
+        raise SystemExit(f"ERRO: esta lista já foi importada em {ja_importadas[marca_da_lista]}. "
+                         "Importar de novo somaria o estoque outra vez. Se for isso mesmo, use --repetir.")
     plano = planejar(con, linhas)
     mostrar(plano)
     resumo = {k: sum(1 for p in plano if p[0] == k) for k in ("criar", "somar", "conferir")}
@@ -109,6 +120,8 @@ def main():
         copia = Path(a.banco).parent / "backups" / f"antes_importar_{datetime.now():%Y-%m-%d_%H%M%S}.db"
         db.copiar_banco(con, copia)
         aplicar(con, plano)
+        ja_importadas[marca_da_lista] = f"{datetime.now():%d/%m/%Y %H:%M} ({a.lista.name})"
+        db.gravar_meta(con, "listas_importadas", json.dumps(ja_importadas, ensure_ascii=False))
         print(f"gravado. cópia de antes: {copia}")
     else:
         print("(nada gravado: rode de novo com --aplicar)")
