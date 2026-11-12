@@ -155,7 +155,7 @@ def limpar_nome(texto):
     return " ".join((texto or "").split())
 
 
-_PALAVRAS_MINUSCULAS = {"de", "da", "do", "das", "dos", "e", "em", "no", "na", "nos", "nas", "com"}
+_PALAVRAS_MINUSCULAS = {"de", "da", "do", "das", "dos", "e", "em", "no", "na", "nos", "nas", "com", "que"}
 
 
 def formatar_nome(texto):
@@ -185,6 +185,13 @@ TAMANHOS = {
 }
 
 
+def e_codigo_de_modelo(palavra):
+    """Código de modelo/referência: letras e depois números, 4+ caracteres ('LRMM049L36', 'XMPP0055', 'MRG4162L').
+    Tamanho ('G1', '2XL') e medida ('100ml') não contam."""
+    c = palavra.lower()
+    return len(c) >= 4 and c not in TAMANHOS and re.fullmatch(r"[a-z]+\d[a-z0-9]*", c) is not None
+
+
 def formatar_nome_produto(texto):
     """Como formatar_nome, com três ajustes (a primeira palavra sempre começa maiúscula):
     - número com unidade grudada fica minúsculo: 'KAIAK 100ML' -> 'Kaiak 100ml';
@@ -198,6 +205,8 @@ def formatar_nome_produto(texto):
             p = p.lower()                                  # '200 G' -> '200 g', '1 L' -> '1 l'
         elif p.lower() in TAMANHOS:
             p = p.upper()                                  # 'xl' -> 'XL', '2xl' -> '2XL', 'g1' -> 'G1'
+        elif e_codigo_de_modelo(p):
+            p = p.upper()                                  # 'lrmm049l36' -> 'LRMM049L36'
         elif i > 0 and p[:1].isdigit():
             p = p.lower()
         saida.append(p)
@@ -208,7 +217,8 @@ GENEROS = {"masculino", "masculina", "feminino", "feminina", "infantil", "unisse
            "adulto", "adulta", "juvenil", "masc", "fem", "bebe", "baby"}
 CORES = {"azul", "preto", "preta", "branco", "branca", "vermelho", "vermelha", "verde", "amarelo", "amarela",
          "rosa", "roxo", "roxa", "lilas", "cinza", "marrom", "bege", "laranja", "dourado", "dourada", "prata",
-         "prateado", "prateada", "nude", "vinho", "caramelo", "estampado", "estampada", "colorido", "colorida"}
+         "prateado", "prateada", "nude", "vinho", "caramelo", "estampado", "estampada", "colorido", "colorida",
+         "rose", "chocolate", "marsala", "grafite", "pink", "fucsia", "salmao", "coral", "off-white", "offwhite"}
 
 
 def organizar_nome_produto(nome):
@@ -235,8 +245,8 @@ def organizar_nome_produto(nome):
             genero.append(p)
         elif c in TAMANHOS and not (i > 0 and chaves[i - 1][:1].isdigit()):
             tamanho.append(p)
-        elif c in CORES:
-            outros.append(p)
+        elif c in CORES or e_codigo_de_modelo(c):
+            outros.append(p)                               # cor e código do modelo vão para o fim
         elif re.fullmatch(r"\d+[a-z]+", c) or (c.isdigit() and seguinte_e_unidade) or (
                 c in UNIDADES and i > 0 and chaves[i - 1].isdigit()):
             outros.append(p)                               # medida: '100ml', '200 g'
@@ -552,7 +562,9 @@ def nomes_parecidos(a, b):
     if not ka or not kb or re.findall(r"\d+", ka.replace(" ", "")) != re.findall(r"\d+", kb.replace(" ", "")):
         return False
     if sorted(w for w in ka.split() if w in TAMANHOS) != sorted(w for w in kb.split() if w in TAMANHOS):
-        return False                                  # tamanhos diferentes: 'Camiseta G' x 'Camiseta GG' 
+        return False                                  # tamanhos diferentes: 'Camiseta G' x 'Camiseta GG'
+    if sorted(w for w in ka.split() if w in CORES) != sorted(w for w in kb.split() if w in CORES):
+        return False                                  # cores diferentes: 'Sutiã G Preto' x 'Sutiã G Bege' 
     if ka.replace(" ", "") == kb.replace(" ", "") or sorted(ka.split()) == sorted(kb.split()):
         return True                                   # só espaço ou ordem das palavras mudou
     if SequenceMatcher(None, ka, kb).ratio() >= SEMELHANCA_MINIMA:

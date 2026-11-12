@@ -966,6 +966,9 @@ def test_sai_sozinho_depois_de_muito_tempo_sem_uso(tmp_path):
     ("Camiseta G", "Camiseta GG", False), ("Camiseta M", "Camiseta G", False), ("Blusa P", "Blusa PP", False),
     ("Camiseta G", "camiseta g", True), ("Camiseta XG", "Camiseta XL", False), ("Camiseta 2XL", "Camiseta 3XL", False),
     ("Calça G1", "Calça G2", False), ("Camiseta L", "Camiseta XL", False), ("Camiseta XL", "camiseta xl", True),
+    ("Sutiã Tomara que Caia G Preto", "Sutiã Tomara que Caia G Bege", False),
+    ("Sutiã Tomara que Caia G Rosé", "sutia tomara que caia g rose", True),
+    ("Sutiã G Preto", "Sutiã G Chocolate", False),
     ("camisa regata gg", "gg camisa regata", True), ("camisa regata gg", "GG  Camisa   Regata", True),
     ("camisa regata gg", "regata camisa gg", True), ("camisa regata gg", "gg camiza regata", True),
     ("camisa regata gg", "gg camisa regata azul", False), ("camisa regata gg", "g camisa regata", False),
@@ -1137,6 +1140,12 @@ def test_padronizacao_v2_conserta_tamanhos_de_quem_rodou_a_v1(tmp_path):
     ("camisa s azul", "Camisa S Azul"), ("vestido xxl", "Vestido XXL"),
     # unidade depois de número continua medida
     ("shampoo 1 L", "Shampoo 1 l"), ("sabonete rosa 90 G", "Sabonete Rosa 90 g"),
+    ("sutiã tomara que caia rosé g", "Sutiã Tomara que Caia G Rosé"),
+    ("SUTIÃ TOMARA QUE CAIA CHOCOLATE GG", "Sutiã Tomara que Caia GG Chocolate"),
+    # código de modelo: maiúsculo e no fim (depois do gênero)
+    ("Relógio Feminino Lince LRMM049L36", "Relógio Lince Feminino LRMM049L36"),
+    ("relogio masculino x-games xmpp0055", "Relogio X-games Masculino XMPP0055"),
+    ("Floratta Red V2 75ml", "Floratta Red V2 75ml"), ("Kit 3 Sabonetes", "Kit 3 Sabonetes"),
 ])
 def test_organiza_nome_de_roupa(antes, depois):
     assert db.formatar_nome_produto(antes) == depois
