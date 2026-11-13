@@ -122,6 +122,9 @@ def _atualizar_banco_antigo(con):
             _copia_antes_de_mudar(con, "organizar_nomes_produtos")
         padronizar_nomes_produtos(con)
         gravar_meta(con, "produtos_nomes_padronizados_v4", date.today().isoformat())
+    if grafias_repetidas(con):                                 # 'Oboticario' e 'O Boticário' viram uma marca só
+        _copia_antes_de_mudar(con, "juntar_marcas_e_tipos")
+        juntar_grafias_repetidas(con)
     colunas = {r["name"] for r in con.execute("PRAGMA table_info(clientes)")}
     if "ultimo_pagamento_planilha" not in colunas:
         with con:
@@ -510,6 +513,58 @@ def padronizar_nomes_produtos(con):
     return [(antes, depois) for _, antes, depois in mudancas]
 
 
+def _chave_de_grafia(texto):
+    """'O Boticário', 'Oboticario', 'o boticario' -> 'oboticario' (sem espaço, acento, pontuação, maiúscula)."""
+    return re.sub(r"[^a-z0-9]", "", normalizar(texto))
+
+
+def _melhor_grafia(grafias, usos):
+    """A mais completa (com espaço, acento e pontuação: 'O Boticário'); empate -> a mais usada."""
+    return max(grafias, key=lambda g: (len(g), sum(not c.isascii() for c in g), usos[g], g))
+
+
+def grafias_repetidas(con):
+    """{coluna: {grafia_que_sai: grafia_que_fica}} para marcas e tipos escritos de jeitos diferentes."""
+    resultado = {}
+    for coluna in ("marca", "tipo"):
+        usos = {r[0]: r[1] for r in con.execute(
+            f"SELECT {coluna}, COUNT(*) FROM produtos WHERE {coluna} <> '' GROUP BY {coluna}")}
+        grupos = {}
+        for g in usos:
+            grupos.setdefault(_chave_de_grafia(g), []).append(g)
+        trocas = {}
+        for grafias in grupos.values():
+            if len(grafias) > 1:
+                fica = _melhor_grafia(grafias, usos)
+                trocas.update({g: fica for g in grafias if g != fica})
+        if trocas:
+            resultado[coluna] = trocas
+    return resultado
+
+
+def juntar_grafias_repetidas(con):
+    """Deixa cada marca/tipo com uma grafia só. Devolve o que trocou (ver grafias_repetidas)."""
+    trocas = grafias_repetidas(con)
+    with con:
+        for coluna, pares in trocas.items():
+            con.executemany(f"UPDATE produtos SET {coluna} = ? WHERE {coluna} = ?",
+                            [(fica, sai) for sai, fica in pares.items()])
+    return trocas
+
+
+def _grafia_cadastrada(con, coluna, valor, ignorar_id=None):
+    """Marca/tipo digitado que já existe escrito de outro jeito ('Oboticario') -> a grafia que já existe."""
+    valor = formatar_nome(valor)
+    chave = _chave_de_grafia(valor)
+    if not chave:
+        return valor
+    for (existente,) in con.execute(f"SELECT DISTINCT {coluna} FROM produtos WHERE {coluna} <> '' AND id IS NOT ?",
+                                    (ignorar_id,)):
+        if _chave_de_grafia(existente) == chave:
+            return existente
+    return valor
+
+
 def _copia_antes_de_mudar(con, motivo):
     """Cópia do banco ao lado dele (backups/) antes de uma mudança em massa feita sozinha."""
     arquivo = con.execute("PRAGMA database_list").fetchone()["file"]
@@ -594,7 +649,8 @@ def criar_produto(con, nome, preco, estoque=0, codigo="", marca="", tipo=""):
     with con:
         cur = con.execute("INSERT INTO produtos (nome, nome_busca, preco, estoque, codigo, marca, tipo)"
                           " VALUES (?, ?, ?, ?, ?, ?, ?)",
-                          (nome, normalizar(nome), preco, estoque, codigo, formatar_nome(marca), formatar_nome(tipo)))
+                          (nome, normalizar(nome), preco, estoque, codigo,
+                           _grafia_cadastrada(con, "marca", marca), _grafia_cadastrada(con, "tipo", tipo)))
     return cur.lastrowid
 
 
@@ -606,8 +662,8 @@ def atualizar_produto(con, produto_id, nome, preco, ativo, estoque=None, codigo=
     atual = produto(con, produto_id)
     codigo = atual["codigo"] if codigo is None else _limpar_codigo(con, codigo, ignorar_id=produto_id)
     _checar_nome_de_produto(con, nome, codigo, ignorar_id=produto_id)
-    marca = atual["marca"] if marca is None else formatar_nome(marca)
-    tipo = atual["tipo"] if tipo is None else formatar_nome(tipo)
+    marca = atual["marca"] if marca is None else _grafia_cadastrada(con, "marca", marca, ignorar_id=produto_id)
+    tipo = atual["tipo"] if tipo is None else _grafia_cadastrada(con, "tipo", tipo, ignorar_id=produto_id)
     with con:
         con.execute("UPDATE produtos SET nome=?, nome_busca=?, preco=?, ativo=?, estoque=COALESCE(?, estoque),"
                     " codigo=?, marca=?, tipo=? WHERE id=?",

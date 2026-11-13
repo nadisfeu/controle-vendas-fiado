@@ -1440,3 +1440,47 @@ def test_desfazer_recusa_produto_que_nao_e_da_lista(tmp_path, monkeypatch):
     con.close()
     with pytest.raises(SystemExit, match="não é desta lista"):
         _desfazer(monkeypatch, arq, "--banco", banco, "--aplicar")
+
+
+# ---------------------------------------------------------------- marca/tipo escritos de jeitos diferentes
+def test_marcas_repetidas_viram_uma_so_com_copia(tmp_path):
+    import sqlite3
+    arq = tmp_path / "m.db"
+    db.conectar(str(arq)).close()
+    bruto = sqlite3.connect(arq)
+    bruto.executemany("INSERT INTO produtos (nome, nome_busca, preco, marca, tipo) VALUES (?, ?, 100, ?, ?)", [
+        ("Kaiak", "kaiak", "Natura", "Colonia"),
+        ("Malbec", "malbec", "Oboticario", "Colônia"),
+        ("Egeo", "egeo", "Oboticario", "Colonia"),
+        ("Floratta", "floratta", "O Boticário", "Perfume"),
+        ("Batom", "batom", "Quem disse berenice", ""),
+        ("Lip Oil", "lip oil", "Quem Disse, Berenice?", ""),
+        ("Óleo", "oleo", "Natura Ekos", ""),                      # outra marca de verdade: não junta
+    ])
+    bruto.commit(); bruto.close()
+    con = db.conectar(str(arq))
+    marca = dict(con.execute("SELECT nome, marca FROM produtos").fetchall())
+    assert marca["Malbec"] == marca["Egeo"] == marca["Floratta"] == "O Boticário"
+    assert marca["Batom"] == marca["Lip Oil"] == "Quem Disse, Berenice?"
+    assert marca["Kaiak"] == "Natura" and marca["Óleo"] == "Natura Ekos"
+    assert db.tipos(con) == ["Colônia", "Perfume"]                    # 'Colonia' juntou com 'Colônia'
+    assert db.grafias_repetidas(con) == {}
+    copias = list((tmp_path / "backups").glob("antes_juntar_marcas_e_tipos_*.db"))
+    assert len(copias) == 1
+    antiga = sqlite3.connect(copias[0])
+    assert ("Oboticario",) in antiga.execute("SELECT marca FROM produtos").fetchall()
+    antiga.close()
+    con.close()
+    db.conectar(str(arq)).close()                                     # de novo: nada a juntar, nenhuma cópia nova
+    assert len(list((tmp_path / "backups").glob("antes_juntar_*.db"))) == 1
+
+
+def test_marca_digitada_de_outro_jeito_usa_a_que_existe(con):
+    db.criar_produto(con, "Malbec", 19000, marca="O Boticário", tipo="Perfume")
+    novo = db.criar_produto(con, "Egeo", 16490, marca="oboticario", tipo="PERFUME")
+    assert (db.produto(con, novo)["marca"], db.produto(con, novo)["tipo"]) == ("O Boticário", "Perfume")
+    db.atualizar_produto(con, novo, "Egeo", 16490, True, marca="O boticario")
+    assert db.marcas(con) == ["O Boticário"]
+    sozinho = db.criar_produto(con, "Kaiak", 17490, marca="Natura")
+    db.atualizar_produto(con, sozinho, "Kaiak", 17490, True, marca="NATURA")  # só ele tem: pode mudar a grafia
+    assert db.produto(con, sozinho)["marca"] == "Natura"
