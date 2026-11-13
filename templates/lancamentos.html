@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block titulo %}Lançamentos{% endblock %}
+{% block conteudo %}
+<a class="voltar" href="{{ url_for('inicio') }}">← Início</a>
+<h1>Todos os lançamentos</h1>
+
+<details class="ajuda">
+  <summary>Como usar</summary>
+  <p>Aqui ficam todas as vendas e pagamentos, do lançado por último para o primeiro. Vendas e pagamentos
+  cancelados não aparecem (eles continuam no extrato do cliente).</p>
+  <p>Para achar um lançamento, digite parte do <b>nome do cliente</b>, escolha o <b>mês</b> ou mostre só
+  <b>vendas</b> ou só <b>pagamentos</b>, e toque em <b>Filtrar</b>. Toque no nome para abrir o cliente.</p>
+  <p>Aparecem {{ por_pagina }} de cada vez; use <b>Mais antigos</b> e <b>Mais recentes</b> no fim da lista.</p>
+</details>
+
+<form method="get" class="filtros filtros-mes filtros-lancamentos">
+  <label>Cliente <input type="search" name="q" value="{{ busca }}" placeholder="Parte do nome…"></label>
+  <label>Mês <input type="month" name="mes" value="{{ mes }}"></label>
+  <label>Mostrar
+    <select name="tipo">
+      <option value="">Vendas e pagamentos</option>
+      <option value="venda" {{ 'selected' if tipo == 'venda' }}>Só vendas</option>
+      <option value="pagamento" {{ 'selected' if tipo == 'pagamento' }}>Só pagamentos</option>
+    </select></label>
+  <button class="botao botao-principal" type="submit">Filtrar</button>
+  {% if filtros %}<a class="botao" href="{{ url_for('lancamentos') }}">Limpar</a>{% endif %}
+</form>
+
+<p class="contagem" id="contagem">{{ resumo.quantidade }} lançamento{{ 's' if resumo.quantidade != 1 }}
+  {%- if tipo != 'pagamento' %} · vendas {{ resumo.vendido|reais }}{% endif %}
+  {%- if tipo != 'venda' %} · pagamentos {{ resumo.recebido|reais }}{% endif %}</p>
+
+<section class="cartao">
+  {% if linhas %}
+  <ul class="lista" id="lancamentos">
+    {% for l in linhas %}
+    <li><span><a href="{{ url_for('cliente_ver', cliente_id=l.cliente_id) }}">{{ l.nome }}</a>
+        <small class="tipo-{{ l.tipo }}">{{ 'comprou' if l.tipo == 'venda' else 'pagou' }} · {{ l.data|data_br }}</small></span>
+        <span class="{{ 'devendo' if l.tipo == 'venda' else 'credito' }}">{{ l.valor|reais }}</span></li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="vazio">{% if filtros %}Nenhum lançamento com esses filtros.{% else %}Nenhuma venda ou pagamento lançado ainda.{% endif %}</p>
+  {% endif %}
+</section>
+
+{% if paginas > 1 %}
+<nav class="paginas" aria-label="Páginas">
+  {% if pagina > 1 %}<a class="botao" href="{{ url_for('lancamentos', pagina=pagina - 1, **filtros) }}">← Mais recentes</a>{% endif %}
+  <span>Página {{ pagina }} de {{ paginas }}</span>
+  {% if pagina < paginas %}<a class="botao" href="{{ url_for('lancamentos', pagina=pagina + 1, **filtros) }}">Mais antigos →</a>{% endif %}
+</nav>
+{% endif %}
+{% endblock %}

@@ -193,7 +193,8 @@ def test_cadastro_repetido_mostra_erro(pagina, site):
 
 
 @pytest.mark.parametrize("caminho", ["/", "/clientes", "/clientes/1", "/clientes/1/venda", "/clientes/1/pagamento",
-                                     "/clientes/1/editar", "/clientes/novo", "/produtos", "/relatorios"])
+                                     "/clientes/1/editar", "/clientes/novo", "/produtos", "/relatorios",
+                                     "/lancamentos", "/lancamentos?tipo=venda&mes=2026-01"])
 def test_telas_cabem_no_celular(pagina, site, caminho):
     url, _ = site
     pagina.goto(url + caminho)
@@ -628,3 +629,25 @@ def test_ordenar_por_movimentacao_recente(pagina, site):
     sem_rolagem_lateral(pg)
     pg.goto(url + "/clientes?ordem=movimento")                              # pelo endereço também
     assert pg.input_value("#ordem") == "movimento"
+
+
+def test_ver_todos_os_lancamentos(pagina, site):
+    url, banco = site
+    con = db.conectar(banco)
+    c = db.criar_cliente(con, "Lançamento Próprio")
+    db.registrar_venda(con, c, "2026-11-10", [dict(produto_id=None, descricao="X", quantidade=1, preco_unit=3000)])
+    db.registrar_pagamento(con, c, "2026-11-11", 1000)
+    con.close()
+    pg = pagina
+    pg.goto(url + "/")
+    pg.click("text=Ver todos os lançamentos")
+    assert pg.url.endswith("/lancamentos")
+    total = pg.locator("#lancamentos li").count()
+    assert total > 0
+    pg.select_option("select[name=tipo]", "pagamento")
+    pg.click("button:has-text('Filtrar')")
+    assert "tipo=pagamento" in pg.url
+    assert all("pagou" in t for t in pg.locator("#lancamentos li small").all_inner_texts())
+    pg.click("text=Limpar")
+    assert pg.locator("#lancamentos li").count() == total
+    foto(pg, "15_lancamentos")

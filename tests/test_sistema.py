@@ -1484,3 +1484,50 @@ def test_marca_digitada_de_outro_jeito_usa_a_que_existe(con):
     sozinho = db.criar_produto(con, "Kaiak", 17490, marca="Natura")
     db.atualizar_produto(con, sozinho, "Kaiak", 17490, True, marca="NATURA")  # só ele tem: pode mudar a grafia
     assert db.produto(con, sozinho)["marca"] == "Natura"
+
+
+# ---------------------------------------------------------------- todos os lançamentos
+def test_lancamentos_filtros_paginas_e_cancelados(con):
+    ana, bia = db.criar_cliente(con, "Ana Lança"), db.criar_cliente(con, "Bia Lança")
+    item = lambda v: [dict(produto_id=None, descricao="X", quantidade=1, preco_unit=v)]
+    for dia in range(1, 8):                                                  # 7 vendas da Ana em outubro
+        db.registrar_venda(con, ana, f"2026-10-{dia:02d}", item(1000))
+    db.registrar_venda(con, bia, "2026-11-03", item(5000))
+    db.registrar_pagamento(con, bia, "2026-11-05", 2000)
+    cancelada = db.registrar_venda(con, bia, "2026-11-06", item(9900))
+    db.cancelar_venda(con, cancelada)
+    linhas, resumo = db.lancamentos(con)
+    assert resumo == dict(quantidade=9, vendido=12000, recebido=2000)        # a cancelada não conta
+    assert (linhas[0]["tipo"], linhas[0]["valor"]) == ("pagamento", 2000)    # o lançado por último primeiro
+    assert db.ultimos_lancamentos(con, 3) == linhas[:3]
+    assert db.lancamentos(con, tipo="pagamento")[1]["quantidade"] == 1
+    assert db.lancamentos(con, mes="2026-10")[1] == dict(quantidade=7, vendido=7000, recebido=0)
+    assert db.lancamentos(con, busca="bia lanca")[1]["quantidade"] == 2      # sem acento/maiúscula
+    p1, _ = db.lancamentos(con, limite=4)
+    p2, _ = db.lancamentos(con, limite=4, pular=4)
+    p3, _ = db.lancamentos(con, limite=4, pular=8)
+    vistos = [(l["tipo"], l["id"]) for l in p1 + p2 + p3]
+    assert len(vistos) == 9 and len(set(vistos)) == 9                         # páginas sem repetir nem pular
+
+
+def test_pagina_de_lancamentos(cliente_http):
+    http, banco = cliente_http
+    http.post("/entrar", data={"senha": "segredo"})
+    con = db.conectar(banco)
+    c = db.criar_cliente(con, "Teca Lançadora")
+    for dia in range(1, 29):
+        db.registrar_venda(con, c, f"2026-09-{dia:02d}", [dict(produto_id=None, descricao="X", quantidade=1, preco_unit=100)])
+    for dia in range(1, 29):
+        db.registrar_pagamento(con, c, f"2026-10-{dia:02d}", 100)
+    con.close()
+    assert "Ver todos os lançamentos" in http.get("/").get_data(as_text=True)
+    pagina = http.get("/lancamentos").get_data(as_text=True)
+    assert "56 lançamentos" in pagina and "Página 1 de 2" in pagina and "Mais antigos" in pagina
+    assert pagina.count("Teca Lançadora</a>") == 50
+    pagina2 = http.get("/lancamentos?pagina=2").get_data(as_text=True)
+    assert pagina2.count("Teca Lançadora</a>") == 6 and "Mais recentes" in pagina2
+    so_set = http.get("/lancamentos?mes=2026-09&tipo=venda").get_data(as_text=True)
+    assert "28 lançamentos · vendas R$ 28,00" in so_set and "pagamentos R$" not in so_set and "Página 1 de" not in so_set
+    assert "Nenhum lançamento com esses filtros" in http.get("/lancamentos?q=ninguem").get_data(as_text=True)
+    for ruim in ("/lancamentos?pagina=abc", "/lancamentos?mes=2026-13-99", "/lancamentos?tipo=x", "/lancamentos?pagina=999"):
+        assert http.get(ruim).status_code == 200                             # entrada estranha não quebra

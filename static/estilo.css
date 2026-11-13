@@ -445,3 +445,5 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--principal);
 .indicador-link:hover { border-color: var(--principal); }
 #mostrar-todos { margin-top: 10px; }
 .lista-clientes .movimento { display: block; color: var(--suave); font-size: .85em; font-weight: normal; }
+.filtros-lancamentos select { height: 46px; font-weight: 400; }
+.paginas { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 12px; margin: 16px 0; }

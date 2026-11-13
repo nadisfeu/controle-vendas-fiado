@@ -1028,13 +1028,37 @@ def relatorio_produto(con, produto_id, ano):
                 maior_mes=max(m["total"] for m in meses))
 
 
+_SQL_LANCAMENTOS = """
+    SELECT * FROM (
+        SELECT 'venda' AS tipo, v.id, v.data, v.criado_em, c.id AS cliente_id, c.nome, c.nome_busca,
+               (SELECT SUM(quantidade * preco_unit) FROM itens_venda WHERE venda_id = v.id) AS valor
+        FROM vendas v JOIN clientes c ON c.id = v.cliente_id WHERE v.cancelada_em IS NULL
+        UNION ALL
+        SELECT 'pagamento', p.id, p.data, p.criado_em, c.id, c.nome, c.nome_busca, p.valor
+        FROM pagamentos p JOIN clientes c ON c.id = p.cliente_id WHERE p.cancelado_em IS NULL
+    )"""
+
+
+def lancamentos(con, tipo="", mes="", busca="", limite=50, pular=0):
+    """Vendas e pagamentos (sem os cancelados), do lançado por último para o primeiro.
+
+    tipo: '' | 'venda' | 'pagamento'; mes: 'AAAA-MM' (data do lançamento); busca: parte do nome do cliente.
+    Devolve (linhas_da_pagina, resumo) com resumo = {quantidade, vendido, recebido} de TODOS os filtrados."""
+    condicoes, args = [], []
+    if tipo in ("venda", "pagamento"):
+        condicoes.append("tipo = ?"); args.append(tipo)
+    if mes:
+        condicoes.append("substr(data, 1, 7) = ?"); args.append(mes)
+    if normalizar(busca):
+        condicoes.append("nome_busca LIKE ?"); args.append(f"%{normalizar(busca)}%")
+    where = (" WHERE " + " AND ".join(condicoes)) if condicoes else ""
+    linhas = con.execute(_SQL_LANCAMENTOS + where + " ORDER BY criado_em DESC, data DESC, id DESC LIMIT ? OFFSET ?",
+                         (*args, limite, pular)).fetchall()
+    r = con.execute("SELECT COUNT(*), COALESCE(SUM(CASE WHEN tipo = 'venda' THEN valor END), 0),"
+                    " COALESCE(SUM(CASE WHEN tipo = 'pagamento' THEN valor END), 0) FROM (" + _SQL_LANCAMENTOS + where + ")",
+                    args).fetchone()
+    return linhas, dict(quantidade=r[0], vendido=r[1], recebido=r[2])
+
+
 def ultimos_lancamentos(con, limite=10):
-    return con.execute("""
-        SELECT * FROM (
-            SELECT 'venda' AS tipo, v.data, v.criado_em, c.id AS cliente_id, c.nome,
-                   (SELECT SUM(quantidade * preco_unit) FROM itens_venda WHERE venda_id = v.id) AS valor
-            FROM vendas v JOIN clientes c ON c.id = v.cliente_id WHERE v.cancelada_em IS NULL
-            UNION ALL
-            SELECT 'pagamento', p.data, p.criado_em, c.id, c.nome, p.valor
-            FROM pagamentos p JOIN clientes c ON c.id = p.cliente_id WHERE p.cancelado_em IS NULL
-        ) ORDER BY criado_em DESC LIMIT ?""", (limite,)).fetchall()
+    return lancamentos(con, limite=limite)[0]

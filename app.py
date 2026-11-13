@@ -6,6 +6,7 @@ import hmac
 import io
 import json
 import os
+import re
 import secrets
 import sys
 import time
@@ -23,6 +24,7 @@ from db import ErroDeCadastro
 PASTA = Path(__file__).resolve().parent
 OPCOES_DIAS_SEM_PAGAR = (30, 60, 90, 180)
 DIAS_SEM_PAGAR_PADRAO = 60
+POR_PAGINA = 50                 # lançamentos por página em "Ver todos os lançamentos"
 MAX_TENTATIVAS_SENHA = 5            # erros seguidos de senha antes de bloquear...
 BLOQUEIO_SEGUNDOS = 15 * 60         # ...por 15 minutos (por endereço de internet)
 DIAS_AVISO_BACKUP = 7               # aviso no Início se ninguém baixou cópia há 7 dias ou mais
@@ -224,6 +226,24 @@ def criar_app(banco, senha, chave, cookie_seguro=False, csrf=True, pasta_copias=
                                dias_atraso=DIAS_SEM_PAGAR_PADRAO,
                                maiores=devendo[:10], resumo=db.resumo_mes(con(), mes), mes=mes,
                                ultimos=db.ultimos_lancamentos(con(), 10))
+
+    @app.route("/lancamentos")
+    @login_obrigatorio
+    def lancamentos():
+        tipo = request.args.get("tipo", "")
+        tipo = tipo if tipo in ("venda", "pagamento") else ""
+        mes = request.args.get("mes", "")
+        mes = mes if re.fullmatch(r"\d{4}-\d{2}", mes) else ""
+        busca = request.args.get("q", "").strip()[:80]
+        try:
+            pagina = max(1, int(request.args.get("pagina", 1)))
+        except ValueError:
+            pagina = 1
+        linhas, resumo = db.lancamentos(con(), tipo, mes, busca, POR_PAGINA, (pagina - 1) * POR_PAGINA)
+        paginas = max(1, -(-resumo["quantidade"] // POR_PAGINA))
+        filtros = {k: v for k, v in dict(tipo=tipo, mes=mes, q=busca).items() if v}
+        return render_template("lancamentos.html", linhas=linhas, resumo=resumo, tipo=tipo, mes=mes, busca=busca,
+                               pagina=min(pagina, paginas), paginas=paginas, filtros=filtros, por_pagina=POR_PAGINA)
 
     # ------------------------------------------------------------ clientes
 

@@ -76,6 +76,7 @@
           <span class="{{ 'devendo' if l.tipo == 'venda' else 'credito' }}">{{ l.valor|reais }}</span></li>
       {% endfor %}
     </ul>
+    <a class="mais" href="{{ url_for('lancamentos') }}">Ver todos os lançamentos →</a>
     {% else %}<p class="vazio">Nenhuma venda ou pagamento lançado ainda.</p>{% endif %}
   </section>
 </div>
