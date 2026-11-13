@@ -602,3 +602,29 @@ def test_filtros_de_tipo_e_marca_ligados(pagina, site):
         ["Calcinha Teste", "Sutiã Teste"]
     pg.select_option("#filtro-tipo", "Calcinha Teste")
     assert [t.split("\n")[0] for t in pg.locator("button.produto").all_inner_texts()] == ["Calcinha Teste Ligada"]
+
+
+def test_ordenar_por_movimentacao_recente(pagina, site):
+    url, banco = site
+    con = db.conectar(banco)
+    antiga = db.criar_cliente(con, "Movimento Antigo")
+    db.registrar_venda(con, antiga, "2020-01-05", [dict(produto_id=None, descricao="X", quantidade=1, preco_unit=1000)])
+    nova = db.criar_cliente(con, "Movimento Novo")
+    db.registrar_venda(con, nova, "2020-01-05", [dict(produto_id=None, descricao="X", quantidade=1, preco_unit=1000)])
+    db.registrar_pagamento(con, nova, "2099-12-30", 500)                   # pagamento mais recente que tudo
+    db.criar_cliente(con, "Movimento Nenhum")
+    con.close()
+    pg = pagina
+    pg.goto(url + "/clientes")
+    assert not pg.locator("#lista li:visible .movimento:visible").count()  # outras ordens: data escondida
+    pg.select_option("#ordem", "movimento")
+    datas = pg.locator("#lista li:visible").evaluate_all("els => els.map(e => e.dataset.movimento)")
+    assert datas == sorted(datas, reverse=True)
+    nomes = [n.split("\n")[0] for n in pg.locator("#lista li:visible .nome").all_inner_texts()]
+    assert nomes[0] == "Movimento Novo"
+    assert nomes.index("Movimento Antigo") < nomes.index("Movimento Nenhum")    # sem movimento vai pro fim
+    assert "última movimentação: 30/12/2099" in pg.inner_text("#lista li:has-text('Movimento Novo')")
+    assert "sem movimentação" in pg.inner_text("#lista li:has-text('Movimento Nenhum')")
+    sem_rolagem_lateral(pg)
+    pg.goto(url + "/clientes?ordem=movimento")                              # pelo endereço também
+    assert pg.input_value("#ordem") == "movimento"

@@ -444,3 +444,4 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--principal);
 .indicador-link { text-decoration: none; color: var(--texto); }
 .indicador-link:hover { border-color: var(--principal); }
 #mostrar-todos { margin-top: 10px; }
+.lista-clientes .movimento { display: block; color: var(--suave); font-size: .85em; font-weight: normal; }

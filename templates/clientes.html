@@ -12,7 +12,8 @@
   <p>Digite parte do nome para filtrar (não precisa de acento nem maiúscula). Toque no cliente para
   ver o histórico e lançar <b>venda</b> ou <b>pagamento</b>.</p>
   <p>Em <b>Mostrar</b> dá para ver só os clientes <b>desativados</b> (ou todos).</p>
-  <p>Em <b>Ordem</b> dá para ver primeiro quem deve mais (maior saldo) ou quem deve menos / tem crédito (menor saldo).</p>
+  <p>Em <b>Ordem</b> dá para ver primeiro quem deve mais (maior saldo), quem deve menos / tem crédito (menor saldo)
+  ou quem comprou ou pagou por último (<b>movimentação recente</b>, com a data embaixo do nome).</p>
   <p>Cores do saldo: <span class="devendo">vermelho = está devendo</span>,
   <span class="credito">verde = tem crédito</span> (pagou a mais), cinza = zerado.</p>
 </details>
@@ -25,6 +26,7 @@
     <option value="nome">Ordem: nome</option>
     <option value="saldo" {{ 'selected' if request.args.get('ordem') == 'saldo' }}>Ordem: maior saldo</option>
     <option value="menor" {{ 'selected' if request.args.get('ordem') == 'menor' }}>Ordem: menor saldo</option>
+    <option value="movimento" {{ 'selected' if request.args.get('ordem') == 'movimento' }}>Ordem: movimentação recente</option>
   </select>
   <form method="get" class="form-mostrar">
     <select name="mostrar" id="mostrar" aria-label="Quais clientes mostrar" onchange="this.form.submit()">
@@ -42,9 +44,15 @@
 
 <ul class="lista lista-clientes" id="lista">
   {% for c in clientes %}
-  <li data-busca="{{ c.nome_busca }}" data-saldo="{{ c.saldo }}">
+  {# última venda ou pagamento no sistema; sem nenhum, o último mês com pagamento na planilha antiga #}
+  {% set mov = [c.ultima_compra or '', c.ultimo_pagamento or ''] | max %}
+  <li data-busca="{{ c.nome_busca }}" data-saldo="{{ c.saldo }}"
+      data-movimento="{{ mov or ((c.ultimo_pagamento_planilha ~ '-00') if c.ultimo_pagamento_planilha else '') }}">
     <a href="{{ url_for('cliente_ver', cliente_id=c.id) }}">
-      <span class="nome">{{ c.nome }}{% if not c.ativo %} <small>(desativado)</small>{% endif %}</span>
+      <span class="nome">{{ c.nome }}{% if not c.ativo %} <small>(desativado)</small>{% endif %}
+        <small class="movimento" hidden>{% if mov %}última movimentação: {{ mov|data_br }}
+          {% elif c.ultimo_pagamento_planilha %}último pagamento: {{ c.ultimo_pagamento_planilha|mes_por_extenso }} (planilha)
+          {% else %}sem movimentação{% endif %}</small></span>
       <span class="saldo {{ 'devendo' if c.saldo > 0 else ('credito' if c.saldo < 0 else 'zerado') }}">
         {% if c.saldo < 0 %}crédito {{ (-c.saldo)|reais }}{% else %}{{ c.saldo|reais }}{% endif %}
       </span>
@@ -72,10 +80,12 @@
     const ordenados = itens.slice().sort(
       ordem.value === 'saldo' ? (a, b) => b.dataset.saldo - a.dataset.saldo || porNome(a, b)
       : ordem.value === 'menor' ? (a, b) => a.dataset.saldo - b.dataset.saldo || porNome(a, b)
+      : ordem.value === 'movimento' ? (a, b) => b.dataset.movimento.localeCompare(a.dataset.movimento) || porNome(a, b)
       : porNome);
     for (const li of ordenados) {
       const mostra = li.dataset.busca.includes(q) && (!soDevendo.checked || +li.dataset.saldo > 0);
       li.hidden = !mostra; if (mostra) visiveis++;
+      li.querySelector('.movimento').hidden = ordem.value !== 'movimento';
       lista.appendChild(li);
     }
     nada.hidden = visiveis > 0;
