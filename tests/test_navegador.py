@@ -567,3 +567,38 @@ def test_venda_mostra_produtos_so_ao_buscar_e_no_maximo_12(pagina, site):
     pg.select_option("#filtro-marca", "Flor de Dália")                      # filtro sozinho também mostra
     assert pg.locator("button.produto").count() == 12
     sem_rolagem_lateral(pg)
+
+
+def test_filtros_de_tipo_e_marca_ligados(pagina, site):
+    url, banco = site
+    con = db.conectar(banco)
+    db.criar_produto(con, "Relógio Teste Ligado A", 45000, estoque=1, marca="Lince Teste", tipo="Relógio Teste")
+    db.criar_produto(con, "Relógio Teste Ligado B", 53000, estoque=1, marca="Prisma Teste", tipo="Relógio Teste")
+    db.criar_produto(con, "Sutiã Teste Ligado", 7900, estoque=2, marca="Flor Teste", tipo="Sutiã Teste")
+    db.criar_produto(con, "Calcinha Teste Ligada", 2900, estoque=2, marca="Flor Teste", tipo="Calcinha Teste")
+    db.criar_produto(con, "Sutiã Teste Sem Marca", 5000, estoque=2, tipo="Sutiã Teste")
+    con.close()
+    pg = pagina
+    opcoes = lambda sel: [o for o in pg.locator(f"{sel} option").all_inner_texts() if "Teste" in o or "Sem" in o]
+    pg.goto(url + "/produtos")
+    pg.select_option("#filtro-tipo", "relógio teste")
+    assert opcoes("#filtro-marca") == ["Marca: Lince Teste", "Marca: Prisma Teste"]   # só marcas de relógio
+    assert pg.locator("#filtro-marca option").first.inner_text() == "Marca: todas"
+    pg.select_option("#filtro-tipo", "sutiã teste")
+    assert opcoes("#filtro-marca") == ["Marca: Flor Teste", "Sem marca"]
+    pg.select_option("#filtro-tipo", "")                                              # volta tudo
+    assert "Marca: Lince Teste" in opcoes("#filtro-marca")
+    pg.select_option("#filtro-marca", "flor teste")                                   # o contrário
+    assert opcoes("#filtro-tipo") == ["Tipo: Calcinha Teste", "Tipo: Sutiã Teste"]
+    pg.select_option("#filtro-tipo", "sutiã teste")
+    assert pg.locator("#lista li:visible .produto-nome a").all_inner_texts() == ["Sutiã Teste Ligado"]
+    assert pg.input_value("#filtro-marca") == "flor teste"                            # escolha continua
+    sem_rolagem_lateral(pg)
+
+    abrir_cliente(pg, url, "Neusa")                                                    # na venda também
+    pg.click("text=Nova venda")
+    pg.select_option("#filtro-marca", "Flor Teste")
+    assert [o for o in pg.locator("#filtro-tipo option").all_inner_texts() if "Teste" in o] == \
+        ["Calcinha Teste", "Sutiã Teste"]
+    pg.select_option("#filtro-tipo", "Calcinha Teste")
+    assert [t.split("\n")[0] for t in pg.locator("button.produto").all_inner_texts()] == ["Calcinha Teste Ligada"]

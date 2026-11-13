@@ -65,4 +65,5 @@
 <script id="dados-carrinho" type="application/json">{{ carrinho|tojson }}</script>
 <script id="dados-saldo" type="application/json">{{ c.saldo|tojson }}</script>
 {% endblock %}
-{% block scripts %}<script src="{{ url_for('static', filename='venda.js') }}"></script>{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='filtros.js') }}"></script>
+<script src="{{ url_for('static', filename='venda.js') }}"></script>{% endblock %}

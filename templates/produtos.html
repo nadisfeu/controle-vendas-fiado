@@ -142,12 +142,14 @@
 </section>
 {% endblock %}
 {% block scripts %}
+<script src="{{ url_for('static', filename='filtros.js') }}"></script>
 <script>
 (function () {
   const lista = document.getElementById('lista');
   if (!lista) return;
   const $ = id => document.getElementById(id);
   const itens = Array.from(lista.children);
+  ligarTipoEMarca($('filtro-tipo'), $('filtro-marca'), itens.map(li => [li.dataset.tipo || '-', li.dataset.marca || '-']));
   const normalizar = s => s.normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase().trim().replace(/\s+/g, ' ');
   const ordens = {
     nome: (a, b) => a.dataset.nome.localeCompare(b.dataset.nome),

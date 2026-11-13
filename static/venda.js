@@ -208,6 +208,7 @@
   const busca = $('busca-produto');
   const buscaMudou = () => { mostrarTodos = false; desenharProdutos(); };
   if (busca) busca.addEventListener('input', buscaMudou);
+  ligarTipoEMarca($('filtro-tipo'), $('filtro-marca'), produtos.map(p => [p.tipo || '-', p.marca || '-']));
   for (const id of ['filtro-tipo', 'filtro-marca']) if ($(id)) $(id).addEventListener('change', buscaMudou);
   if ($('mostrar-todos')) $('mostrar-todos').addEventListener('click', () => { mostrarTodos = true; desenharProdutos(); });
   $('form-venda').addEventListener('submit', () => { $('salvar').disabled = true; });  // evita salvar duas vezes
