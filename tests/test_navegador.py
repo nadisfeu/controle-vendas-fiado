@@ -99,9 +99,13 @@ def test_fluxo_venda_pagamento_cancelamento(pagina, site):
     foto(pg, "02_cliente")
     pg.click("text=Nova venda")
     assert pg.is_disabled("#salvar")
+    assert pg.locator("button.produto").count() == 0                     # sem busca, a lista começa vazia
+    assert "Digite o nome" in pg.inner_text("#aviso-produtos")
+    pg.fill("#busca-produto", "perfume")
     pg.click("button.produto:has-text('Perfume')")
     pg.click("button.produto:has-text('Perfume')")
     assert pg.inner_text("button.produto:has-text('Perfume') .qtd") == "2"
+    pg.fill("#busca-produto", "sabonete")
     pg.click("button.produto:has-text('Sabonete')")
     pg.click("#carrinho li:has-text('Sabonete') .mais")
     pg.fill("#avulso-descricao", "Frete")
@@ -210,6 +214,7 @@ def test_estoque_aparece_e_avisa_na_venda(pagina, site):
 
     abrir_cliente(pg, url, "Otávio")
     pg.click("text=Nova venda")
+    pg.fill("#busca-produto", "kit")
     botao = pg.locator("button.produto:has-text('Kit Presente')")
     assert "restam 2" in botao.inner_text()
     for _ in range(3):
@@ -288,6 +293,7 @@ def test_desconto_no_item_da_venda(pagina, site):
 
     abrir_cliente(pg, url, "Neusa")
     pg.click("text=Nova venda")
+    pg.fill("#busca-produto", "importado")
     pg.click("button.produto:has-text('Perfume Importado')")
     linha = pg.locator("#carrinho li:has-text('Perfume Importado')")
     assert not linha.locator(".desconto").is_visible()
@@ -530,3 +536,34 @@ def test_desconto_em_porcentagem(pagina, site):
     foto(pg, "17_desconto_porcentagem")
     pg.click("#salvar")
     assert "Venda de R$ 215,00 registrada" in pg.inner_text(".aviso") and "desconto de R$ 25,00" in pg.inner_text(".aviso")
+
+
+def test_venda_mostra_produtos_so_ao_buscar_e_no_maximo_12(pagina, site):
+    url, banco = site
+    con = db.conectar(banco)
+    for n in range(20):
+        db.criar_produto(con, f"Sutiã Busca Ref {7201100 + n} M", 6900, estoque=1, codigo=f"{7201100 + n}-M",
+                         marca="Flor de Dália", tipo="Sutiã")
+    con.close()
+    pg = pagina
+    abrir_cliente(pg, url, "Neusa")
+    pg.click("text=Nova venda")
+    assert pg.locator("button.produto").count() == 0
+    assert not pg.is_visible("#mostrar-todos")
+    pg.fill("#busca-produto", "sutia busca")
+    assert pg.locator("button.produto").count() == 12
+    assert "Mostrando 12 de 20" in pg.inner_text("#aviso-produtos")
+    pg.click("#mostrar-todos")
+    assert pg.locator("button.produto").count() == 20 and not pg.is_visible("#mostrar-todos")
+    pg.fill("#busca-produto", "7201113")                                   # pela ref: acha um só
+    assert pg.locator("button.produto").count() == 1 and pg.inner_text("#aviso-produtos") == ""
+    pg.locator("button.produto").click()
+    pg.fill("#busca-produto", "")                                          # apagou a busca: lista some
+    assert pg.locator("button.produto").count() == 0
+    assert "Sutiã Busca Ref 7201113 M" in pg.inner_text("#carrinho")       # o item continua na venda
+    pg.fill("#busca-produto", "nada disso")
+    assert "Nenhum produto encontrado" in pg.inner_text("#aviso-produtos")
+    pg.fill("#busca-produto", "")
+    pg.select_option("#filtro-marca", "Flor de Dália")                      # filtro sozinho também mostra
+    assert pg.locator("button.produto").count() == 12
+    sem_rolagem_lateral(pg)

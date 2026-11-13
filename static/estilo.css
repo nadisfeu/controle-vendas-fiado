@@ -443,3 +443,4 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--principal);
 .pct-item input { width: 72px; min-height: 36px; padding: 6px 8px; font-weight: 600; text-align: right; }
 .indicador-link { text-decoration: none; color: var(--texto); }
 .indicador-link:hover { border-color: var(--principal); }
+#mostrar-todos { margin-top: 10px; }

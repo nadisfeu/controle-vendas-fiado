@@ -7,7 +7,8 @@
 <details class="ajuda" open>
   <summary>Como usar</summary>
   <ol>
-    <li>Toque nos produtos que o cliente levou. Tocar de novo soma mais um.</li>
+    <li>Digite o nome, a ref ou a marca do produto na busca (ou escolha o tipo/marca) e toque nele.
+      Tocar de novo soma mais um. Para o próximo produto, é só apagar a busca e digitar outro.</li>
     <li>Na lista "Itens desta venda", ajuste a quantidade com − e +.</li>
     <li><b>Deu desconto?</b> Toque em <b>"Vendido por"</b> e digite o valor que o cliente pagou em cada um
       (ex.: o perfume é 200,00 e saiu por 170,00), <b>ou</b> digite a porcentagem em <b>"Desconto %"</b>
@@ -28,7 +29,9 @@
       {% if marcas %}<select id="filtro-marca" aria-label="Filtrar por marca"><option value="">Marca: todas</option>
         {% for m in marcas %}<option>{{ m }}</option>{% endfor %}</select>{% endif %}
     </div>
+    <p class="dica" id="aviso-produtos" aria-live="polite"></p>
     <ul class="grade-produtos" id="produtos"></ul>
+    <button type="button" class="botao" id="mostrar-todos" hidden></button>
     {% else %}
     <p class="vazio">Nenhum produto cadastrado ainda. <a href="{{ url_for('produtos') }}">Cadastrar produtos</a>
       ou use o item avulso abaixo.</p>

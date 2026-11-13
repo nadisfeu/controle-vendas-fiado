@@ -42,15 +42,29 @@
   }
   const mostrarPct = n => (Math.round(n * 10) / 10).toString().replace('.', ',');
 
+  const LIMITE = 12;          // produtos mostrados de cada vez (sem rolar demais no celular)
+  let mostrarTodos = false;
+
   function desenharProdutos() {
     const lista = $('produtos');
     if (!lista) return;
     const q = normalizar($('busca-produto').value);
     const tipo = $('filtro-tipo') ? $('filtro-tipo').value : '', marca = $('filtro-marca') ? $('filtro-marca').value : '';
     lista.innerHTML = '';
-    for (const p of produtos) {
-      if (!normalizar([p.nome, p.codigo, p.tipo, p.marca].join(' ')).includes(q)) continue;
-      if ((tipo && p.tipo !== tipo) || (marca && p.marca !== marca)) continue;
+    const aviso = $('aviso-produtos');
+    // Sem busca nem filtro, a lista fica vazia: no celular, mostrar tudo obriga a rolar muito até "Salvar venda".
+    if (!q && !tipo && !marca) {
+      aviso.textContent = 'Digite o nome, a ref ou a marca para achar o produto.';
+      return;
+    }
+    const achados = produtos.filter(p => normalizar([p.nome, p.codigo, p.tipo, p.marca].join(' ')).includes(q) &&
+      !(tipo && p.tipo !== tipo) && !(marca && p.marca !== marca));
+    const mostrar = mostrarTodos ? achados : achados.slice(0, LIMITE);
+    aviso.textContent = !achados.length ? 'Nenhum produto encontrado.'
+      : achados.length > mostrar.length ? `Mostrando ${mostrar.length} de ${achados.length}. Digite mais (ex.: o tamanho ou a ref) para achar mais rápido.` : '';
+    $('mostrar-todos').hidden = achados.length <= mostrar.length;
+    $('mostrar-todos').textContent = `Mostrar todos os ${achados.length}`;
+    for (const p of mostrar) {
       const li = document.createElement('li');
       const b = document.createElement('button');
       b.type = 'button';
@@ -192,8 +206,10 @@
     desenhar();
   });
   const busca = $('busca-produto');
-  if (busca) busca.addEventListener('input', desenharProdutos);
-  for (const id of ['filtro-tipo', 'filtro-marca']) if ($(id)) $(id).addEventListener('change', desenharProdutos);
+  const buscaMudou = () => { mostrarTodos = false; desenharProdutos(); };
+  if (busca) busca.addEventListener('input', buscaMudou);
+  for (const id of ['filtro-tipo', 'filtro-marca']) if ($(id)) $(id).addEventListener('change', buscaMudou);
+  if ($('mostrar-todos')) $('mostrar-todos').addEventListener('click', () => { mostrarTodos = true; desenharProdutos(); });
   $('form-venda').addEventListener('submit', () => { $('salvar').disabled = true; });  // evita salvar duas vezes
 
   desenhar();
